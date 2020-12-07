@@ -13,7 +13,7 @@ from matplotlib import pyplot as plt
 from matplotlib.ticker import AutoMinorLocator, MultipleLocator
 from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
 
-from models import FGAT
+from models import GATHA
 import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -25,7 +25,7 @@ epsilon = 1 - math.log(2)
 def gen_model(args):
     norm = args.norm
     if args.use_labels:
-        model = FGAT(
+        model = GATHA(
             in_feats + n_classes,
             n_classes,
             K=args.K,
@@ -39,7 +39,7 @@ def gen_model(args):
             norm=norm
         )
     else:
-        model = FGAT(
+        model = GATHA(
             in_feats,
             n_classes,
             K=args.K,
@@ -130,7 +130,7 @@ def evaluate(model, graph, labels, train_idx, val_idx, test_idx, use_labels, eva
     )
 
 
-def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running):
+def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running, log_f):
     # define model and optimizer
     model = gen_model(args)
     model = model.to(device)
@@ -165,22 +165,22 @@ def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running)
             best_test_acc = test_acc
 
         if epoch % args.log_every == 0:
-            print(f"Run: {n_running}/{args.n_runs}, Epoch: {epoch}/{args.n_epochs}")
-            print(
+            log_f.writelines(f"Run: {n_running}/{args.n_runs}, Epoch: {epoch}/{args.n_epochs} \n")
+            log_f.writelines(
                 f"Time: {(total_time / epoch):.4f}, Loss: {loss.item():.4f}, Acc: {acc:.4f}\n"
                 f"Train/Val/Test loss: {train_loss:.4f}/{val_loss:.4f}/{test_loss:.4f}\n"
-                f"Train/Val/Test/Best val/Best test acc: {train_acc:.4f}/{val_acc:.4f}/{test_acc:.4f}/{best_val_acc:.4f}/{best_test_acc:.4f}"
+                f"Train/Val/Test/Best val/Best test acc: {train_acc:.4f}/{val_acc:.4f}/{test_acc:.4f}/{best_val_acc:.4f}/{best_test_acc:.4f}\n"
             )
-            print("model sigma:", [conv.sigma.cpu().item() for conv in model.convs])
-
+            log_f.writelines("model sigma:" + str([conv.sigma.cpu().item() for conv in model.convs]) + "\n")
+            log_f.flush()
         for l, e in zip(
             [accs, train_accs, val_accs, test_accs, losses, train_losses, val_losses, test_losses],
             [acc, train_acc, val_acc, test_acc, loss.item(), train_loss, val_loss, test_loss],
         ):
             l.append(e)
 
-    print("*" * 50)
-    print(f"Average epoch time: {total_time / args.n_epochs}, Test acc: {best_test_acc}")
+    log_f.writelines("*" * 50 + "\n")
+    log_f.writelines(f"Average epoch time: {total_time / args.n_epochs}, Test acc: {best_test_acc} \n")
 
     if args.plot_curves:
         fig = plt.figure(figsize=(24, 24))
@@ -238,7 +238,7 @@ def main():
     argparser.add_argument(
         "--use-labels", action="store_true", help="Use labels in the training set as input features."
     )
-    argparser.add_argument("--norm", type=str, help="Use symmetrically normalized adjacency matrix. values=['none','gcn','gat','both']", default='none')
+    argparser.add_argument("--norm", type=str, help="Choices of normalization methods. values=['none','gcn','gat','both']", default='none')
     argparser.add_argument("--lr", type=float, default=0.002)
     argparser.add_argument("--n-layers", type=int, default=3)
     argparser.add_argument("--K", type=int, default=3)
@@ -250,6 +250,7 @@ def main():
     argparser.add_argument("--wd", type=float, default=0)
     argparser.add_argument("--log-every", type=int, default=20)
     argparser.add_argument("--plot-curves", action="store_true")
+    argparser.add_argument("--log-path", type=str, default="../logs/gat-ha/")
     args = argparser.parse_args()
 
     if args.cpu:
@@ -258,8 +259,18 @@ def main():
         device = th.device("cuda:%d" % args.gpu)
 
     # load data
-    data = DglNodePropPredDataset(name="ogbn-arxiv")
+    data = DglNodePropPredDataset(name="ogbn-arxiv", root="../dataset")
     evaluator = Evaluator(name="ogbn-arxiv")
+
+    log_f = open(args.log_path + \
+            "lr_{}_n_layers_{}_K_{}_n_heads_{}_n_hidden_{}_norm_{}_dropout_{}_feat_drop_{}_attn_drop_{}_use_label_{}".format(
+                args.lr, 
+                args.n_layers, 
+                args.K, 
+                args.n_heads, 
+                args.n_hidden,
+                args.norm, 
+                args.dropout, args.feat_drop, args.attn_drop, args.use_labels), 'w')
 
     splitted_idx = data.get_idx_split()
     train_idx, val_idx, test_idx = splitted_idx["train"], splitted_idx["valid"], splitted_idx["test"]
@@ -270,9 +281,9 @@ def main():
     graph.add_edges(dsts, srcs)
 
     # add self-loop
-    print(f"Total edges before adding self-loop {graph.number_of_edges()}")
+    log_f.writelines(f"Total edges before adding self-loop {graph.number_of_edges()} \n")
     graph = graph.remove_self_loop().add_self_loop()
-    print(f"Total edges after adding self-loop {graph.number_of_edges()}")
+    log_f.writelines(f"Total edges after adding self-loop {graph.number_of_edges()} \n")
 
     in_feats = graph.ndata["feat"].shape[1]
     n_classes = (labels.max() + 1).item()
@@ -289,17 +300,18 @@ def main():
     test_accs = []
 
     for i in range(1, args.n_runs + 1):
-        val_acc, test_acc = run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, i)
+        val_acc, test_acc = run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, i, log_f)
         val_accs.append(val_acc)
         test_accs.append(test_acc)
 
-    print(f"Runned {args.n_runs} times")
-    print("Val Accs:", val_accs)
-    print("Test Accs:", test_accs)
-    print(f"Average val accuracy: {np.mean(val_accs)} ± {np.std(val_accs)}")
-    print(f"Average test accuracy: {np.mean(test_accs)} ± {np.std(test_accs)}")
-    print(f"Number of params: {count_parameters(args)}")
-    print(f"args: {args}")
+    log_f.writelines(f"Runned {args.n_runs} times \n")
+    log_f.writelines("Val Accs:" + str(val_accs) + " \n")
+    log_f.writelines("Test Accs:" + str(test_accs) + " \n")
+    log_f.writelines(f"Average val accuracy: {np.mean(val_accs)} ± {np.std(val_accs)} \n")
+    log_f.writelines(f"Average test accuracy: {np.mean(test_accs)} ± {np.std(test_accs)} \n")
+    log_f.writelines(f"Number of params: {count_parameters(args)} \n")
+    log_f.writelines(f"args: {args} \n")
+    log_f.close()
 
 
 if __name__ == "__main__":

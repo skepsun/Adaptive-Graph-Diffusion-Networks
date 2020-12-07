@@ -13,7 +13,7 @@ from matplotlib import pyplot as plt
 from matplotlib.ticker import AutoMinorLocator, MultipleLocator
 from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
 
-from models import HGAT
+from models import SGATHA
 import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -23,8 +23,9 @@ epsilon = 1 - math.log(2)
 
 
 def gen_model(args):
+    norm = 'both' if args.use_norm else None
     if args.use_labels:
-        model = HGAT(
+        model = SGATHA(
             in_feats + n_classes,
             n_classes,
             K=args.K,
@@ -34,9 +35,10 @@ def gen_model(args):
             activation=F.relu,
             dropout=args.dropout,
             attn_drop=args.attn_drop,
+            norm=norm
         )
     else:
-        model = HGAT(
+        model = SGATHA(
             in_feats,
             n_classes,
             K=args.K,
@@ -46,6 +48,7 @@ def gen_model(args):
             activation=F.relu,
             dropout=args.dropout,
             attn_drop=args.attn_drop,
+            norm=norm
         )
 
     return model
@@ -232,8 +235,8 @@ def main():
     argparser.add_argument(
         "--use-labels", action="store_true", help="Use labels in the training set as input features."
     )
-    # argparser.add_argument("--use-norm", action="store_true", help="Use symmetrically normalized adjacency matrix.")
-    argparser.add_argument("--lr", type=float, default=0.01)
+    argparser.add_argument("--use-norm", action="store_true", help="Use symmetrically normalized adjacency matrix.")
+    argparser.add_argument("--lr", type=float, default=0.002)
     argparser.add_argument("--n-layers", type=int, default=3)
     argparser.add_argument("--K", type=int, default=3)
     argparser.add_argument("--n-heads", type=int, default=1)

@@ -259,7 +259,7 @@ class GAT(nn.Module):
 
         return h
 
-class HGATConv(nn.Module):
+class GCNHAConv(nn.Module):
     def __init__(
         self,
         in_feats,
@@ -273,7 +273,7 @@ class HGATConv(nn.Module):
         activation=None,
         allow_zero_in_degree=False,
     ):
-        super(HGATConv, self).__init__()
+        super(GCNHAConv, self).__init__()
         self._num_heads = num_heads
         self._in_src_feats, self._in_dst_feats = expand_as_pair(in_feats)
         self._out_feats = out_feats
@@ -358,7 +358,7 @@ class HGATConv(nn.Module):
                 rst = self._activation(rst)
             return rst
 
-class HGAT(nn.Module):
+class GCNHA(nn.Module):
     def __init__(
         self, in_feats, n_classes, n_hidden, n_layers, n_heads, activation, K=3, dropout=0.0, attn_drop=0.0
     ):
@@ -380,7 +380,7 @@ class HGAT(nn.Module):
             # in_channels = n_heads if i > 0 else 1
             out_channels = n_heads
 
-            self.convs.append(HGATConv(in_hidden, out_hidden, K=K, num_heads=n_heads, attn_drop=attn_drop))
+            self.convs.append(GCNHAConv(in_hidden, out_hidden, K=K, num_heads=n_heads, attn_drop=attn_drop))
 
             self.linear.append(nn.Linear(in_hidden, out_channels * out_hidden, bias=False))
             if i < n_layers - 1:
@@ -413,7 +413,7 @@ class HGAT(nn.Module):
 
         return h
 
-class FGATConv(nn.Module):
+class GATHAConv(nn.Module):
     def __init__(
         self,
         in_feats,
@@ -428,7 +428,7 @@ class FGATConv(nn.Module):
         allow_zero_in_degree=False,
         norm='both'
     ):
-        super(FGATConv, self).__init__()
+        super(GATHAConv, self).__init__()
         self._num_heads = num_heads
         self._in_src_feats, self._in_dst_feats = expand_as_pair(in_feats)
         self._out_feats = out_feats
@@ -551,7 +551,7 @@ class FGATConv(nn.Module):
                 rst = self._activation(rst)
             return rst
 
-class FGAT(nn.Module):
+class GATHA(nn.Module):
     def __init__(
         self, in_feats, n_classes, n_hidden, n_layers, n_heads, activation, K=3, dropout=0.0, feat_drop=0.0, attn_drop=0.0, norm='both'
     ):
@@ -573,7 +573,7 @@ class FGAT(nn.Module):
             # in_channels = n_heads if i > 0 else 1
             out_channels = n_heads
 
-            self.convs.append(FGATConv(in_hidden, out_hidden, K=K, num_heads=n_heads, feat_drop=feat_drop, attn_drop=attn_drop, norm=norm))
+            self.convs.append(GATHAConv(in_hidden, out_hidden, K=K, num_heads=n_heads, feat_drop=feat_drop, attn_drop=attn_drop, norm=norm))
 
             self.linear.append(nn.Linear(in_hidden, out_channels * out_hidden, bias=False))
             if i < n_layers - 1:
@@ -606,7 +606,7 @@ class FGAT(nn.Module):
 
         return h
 
-class SFGATConv(nn.Module):
+class SGATHAConv(nn.Module):
     def __init__(
         self,
         in_feats,
@@ -621,7 +621,7 @@ class SFGATConv(nn.Module):
         allow_zero_in_degree=False,
         norm='both'
     ):
-        super(SFGATConv, self).__init__()
+        super(SGATHAConv, self).__init__()
         self._num_heads = num_heads
         self._in_src_feats, self._in_dst_feats = expand_as_pair(in_feats)
         self._out_feats = out_feats
@@ -735,7 +735,7 @@ class SFGATConv(nn.Module):
                 rst = self._activation(rst)
             return rst
 
-class SFGAT(nn.Module):
+class SGATHA(nn.Module):
     def __init__(
         self, in_feats, n_classes, n_hidden, n_layers, n_heads, activation, K=3, dropout=0.0, attn_drop=0.0, norm='both'
     ):
@@ -757,7 +757,7 @@ class SFGAT(nn.Module):
             # in_channels = n_heads if i > 0 else 1
             out_channels = n_heads
 
-            self.convs.append(SFGATConv(in_hidden, out_hidden, K=K, num_heads=n_heads, attn_drop=attn_drop, norm=norm))
+            self.convs.append(SGATHAConv(in_hidden, out_hidden, K=K, num_heads=n_heads, attn_drop=attn_drop, norm=norm))
 
             self.linear.append(nn.Linear(in_hidden, out_channels * out_hidden, bias=False))
             if i < n_layers - 1:
