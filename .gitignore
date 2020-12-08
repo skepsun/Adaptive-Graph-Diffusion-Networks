@@ -5,5 +5,5 @@ nohup.*
 *.log
 /.vscode/
 /.idea/
-
+*.zip
 
