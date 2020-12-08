@@ -3,5 +3,7 @@
 nohup.*
 *.out
 *.log
+/.vscode/
+/.idea/
 
 
