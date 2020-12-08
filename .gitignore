@@ -2,5 +2,6 @@
 /dataset/
 nohup.*
 *.out
+*.log
 
 

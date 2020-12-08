@@ -12,6 +12,7 @@ import torch.optim as optim
 from matplotlib import pyplot as plt
 from matplotlib.ticker import AutoMinorLocator, MultipleLocator
 from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
+from logger import get_logger
 
 from models import GATHA
 import os
@@ -130,7 +131,7 @@ def evaluate(model, graph, labels, train_idx, val_idx, test_idx, use_labels, eva
     )
 
 
-def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running, log_f):
+def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running, logger):
     # define model and optimizer
     model = gen_model(args)
     model = model.to(device)
@@ -165,22 +166,19 @@ def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running,
             best_test_acc = test_acc
 
         if epoch % args.log_every == 0:
-            log_f.writelines(f"Run: {n_running}/{args.n_runs}, Epoch: {epoch}/{args.n_epochs} \n")
-            log_f.writelines(
-                f"Time: {(total_time / epoch):.4f}, Loss: {loss.item():.4f}, Acc: {acc:.4f}\n"
-                f"Train/Val/Test loss: {train_loss:.4f}/{val_loss:.4f}/{test_loss:.4f}\n"
-                f"Train/Val/Test/Best val/Best test acc: {train_acc:.4f}/{val_acc:.4f}/{test_acc:.4f}/{best_val_acc:.4f}/{best_test_acc:.4f}\n"
-            )
-            log_f.writelines("model sigma:" + str([conv.sigma.cpu().item() for conv in model.convs]) + "\n")
-            log_f.flush()
+            logger.info(f"Run: {n_running}/{args.n_runs}, Epoch: {epoch}/{args.n_epochs}", )
+            logger.info(f"Time: {(total_time / epoch):.4f}, Loss: {loss.item():.4f}, Acc: {acc:.4f}")
+            logger.info(f"Train/Val/Test loss: {train_loss:.4f}/{val_loss:.4f}/{test_loss:.4f}")
+            logger.info(f"Train/Val/Test/Best val/Best test acc: {train_acc:.4f}/{val_acc:.4f}/{test_acc:.4f}/{best_val_acc:.4f}/{best_test_acc:.4f}")
+            logger.info(f"model sigma: {[conv.sigma.cpu().item() for conv in model.convs]}")
         for l, e in zip(
             [accs, train_accs, val_accs, test_accs, losses, train_losses, val_losses, test_losses],
             [acc, train_acc, val_acc, test_acc, loss.item(), train_loss, val_loss, test_loss],
         ):
             l.append(e)
 
-    log_f.writelines("*" * 50 + "\n")
-    log_f.writelines(f"Average epoch time: {total_time / args.n_epochs}, Test acc: {best_test_acc} \n")
+    logger.info("*" * 50)
+    logger.info(f"Average epoch time: {total_time / args.n_epochs}, Test acc: {best_test_acc}")
 
     if args.plot_curves:
         fig = plt.figure(figsize=(24, 24))
@@ -262,15 +260,15 @@ def main():
     data = DglNodePropPredDataset(name="ogbn-arxiv", root="../dataset")
     evaluator = Evaluator(name="ogbn-arxiv")
 
-    log_f = open(args.log_path + \
-            "lr_{}_n_layers_{}_K_{}_n_heads_{}_n_hidden_{}_norm_{}_dropout_{}_feat_drop_{}_attn_drop_{}_use_label_{}".format(
-                args.lr, 
-                args.n_layers, 
-                args.K, 
-                args.n_heads, 
-                args.n_hidden,
-                args.norm, 
-                args.dropout, args.feat_drop, args.attn_drop, args.use_labels), 'w')
+    logger = get_logger("{}lr_{}_n_layers_{}_K_{}_n_heads_{}_n_hidden_{}_norm_{}_dropout_{}_feat_drop_{}_attn_drop_{}_use_label_{}.log".format(
+                        args.log_path,
+                        args.lr, 
+                        args.n_layers, 
+                        args.K, 
+                        args.n_heads, 
+                        args.n_hidden,
+                        args.norm, 
+                        args.dropout, args.feat_drop, args.attn_drop, args.use_labels))
 
     splitted_idx = data.get_idx_split()
     train_idx, val_idx, test_idx = splitted_idx["train"], splitted_idx["valid"], splitted_idx["test"]
@@ -281,9 +279,9 @@ def main():
     graph.add_edges(dsts, srcs)
 
     # add self-loop
-    log_f.writelines(f"Total edges before adding self-loop {graph.number_of_edges()} \n")
+    logger.debug(f"Total edges before adding self-loop {graph.number_of_edges()}")
     graph = graph.remove_self_loop().add_self_loop()
-    log_f.writelines(f"Total edges after adding self-loop {graph.number_of_edges()} \n")
+    logger.debug(f"Total edges after adding self-loop {graph.number_of_edges()}")
 
     in_feats = graph.ndata["feat"].shape[1]
     n_classes = (labels.max() + 1).item()
@@ -300,18 +298,17 @@ def main():
     test_accs = []
 
     for i in range(1, args.n_runs + 1):
-        val_acc, test_acc = run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, i, log_f)
+        val_acc, test_acc = run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, i, logger)
         val_accs.append(val_acc)
         test_accs.append(test_acc)
 
-    log_f.writelines(f"Runned {args.n_runs} times \n")
-    log_f.writelines("Val Accs:" + str(val_accs) + " \n")
-    log_f.writelines("Test Accs:" + str(test_accs) + " \n")
-    log_f.writelines(f"Average val accuracy: {np.mean(val_accs)} ± {np.std(val_accs)} \n")
-    log_f.writelines(f"Average test accuracy: {np.mean(test_accs)} ± {np.std(test_accs)} \n")
-    log_f.writelines(f"Number of params: {count_parameters(args)} \n")
-    log_f.writelines(f"args: {args} \n")
-    log_f.close()
+    logger.info(f"Runned {args.n_runs} times")
+    logger.info(f"Val Accs: {val_accs}")
+    logger.info(f"Test Accs: {test_accs}")
+    logger.info(f"Average val accuracy: {np.mean(val_accs)} ± {np.std(val_accs)}")
+    logger.info(f"Average test accuracy: {np.mean(test_accs)} ± {np.std(test_accs)}")
+    logger.info(f"Number of params: {count_parameters(args)}")
+    logger.info(f"args: {args}")
 
 
 if __name__ == "__main__":
