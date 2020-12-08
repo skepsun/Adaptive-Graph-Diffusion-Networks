@@ -482,7 +482,7 @@ class GATHAConv(nn.Module):
             h = self.fc(self.feat_drop(feat)).view(-1, self._num_heads, self._out_feats)
             hstack = [h]
 
-            feat_src = feat_dst = h
+            feat_src = h
             
             el = (feat_src * self.attn_l).sum(-1).unsqueeze(-1)
             er = (feat_src * self.attn_r).sum(-1).unsqueeze(-1)
@@ -516,15 +516,15 @@ class GATHAConv(nn.Module):
                 graph.srcdata.update({"ft": feat_src})
                 # message passing
                 graph.update_all(fn.u_mul_e("ft", "a", "m"), fn.sum("m", "ft"))
-                rst = graph.dstdata["ft"]
+                feat_src = graph.dstdata["ft"]
                 if self._norm in ["both", "gcn"]:
                     degs = graph.in_degrees().float().clamp(min=1)
                     norm = torch.pow(degs, 0.5)
-                    shp = norm.shape + (1,) * (feat_dst.dim() - 1)
+                    shp = norm.shape + (1,) * (feat_src.dim() - 1)
                     norm = torch.reshape(norm, shp)
-                    rst = rst * norm
+                    feat_src = feat_src * norm
 
-                hstack.append(rst)
+                hstack.append(feat_src)
 
             feat_src = h
             fstack_dst = hstack
