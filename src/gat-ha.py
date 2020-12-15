@@ -10,6 +10,7 @@ import numpy as np
 import torch as th
 import torch.nn.functional as F
 import torch.optim as optim
+import dgl
 from matplotlib import pyplot as plt
 from matplotlib.ticker import AutoMinorLocator, MultipleLocator
 from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
