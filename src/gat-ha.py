@@ -4,6 +4,7 @@
 import argparse
 import math
 import time
+import random
 
 import numpy as np
 import torch as th
@@ -66,6 +67,15 @@ def cross_entropy(x, labels):
 def compute_acc(pred, labels, evaluator):
     return evaluator.eval({"y_pred": pred.argmax(dim=-1, keepdim=True), "y_true": labels})["acc"]
 
+def seed(seed=0):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    dgl.random.seed(seed)
 
 def add_labels(feat, labels, idx):
     onehot = th.zeros([feat.shape[0], n_classes]).to(device)
@@ -231,6 +241,7 @@ def main():
     argparser = argparse.ArgumentParser("HGAT on OGBN-Arxiv", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     argparser.add_argument("--cpu", action="store_true", help="CPU mode. This option overrides --gpu.")
     argparser.add_argument("--gpu", type=int, default=0, help="GPU device ID.")
+    argparser.add_argument("--seed", type=int, default=0, help="initial random seed."
     argparser.add_argument("--n-runs", type=int, default=10)
     argparser.add_argument("--n-epochs", type=int, default=2000)
     argparser.add_argument(
@@ -298,6 +309,7 @@ def main():
     test_accs = []
 
     for i in range(1, args.n_runs + 1):
+        seed(i + args.seed)
         val_acc, test_acc = run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, i, logger)
         val_accs.append(val_acc)
         test_accs.append(test_acc)
