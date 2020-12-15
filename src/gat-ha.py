@@ -241,7 +241,7 @@ def main():
     argparser = argparse.ArgumentParser("HGAT on OGBN-Arxiv", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     argparser.add_argument("--cpu", action="store_true", help="CPU mode. This option overrides --gpu.")
     argparser.add_argument("--gpu", type=int, default=0, help="GPU device ID.")
-    argparser.add_argument("--seed", type=int, default=0, help="initial random seed."
+    argparser.add_argument("--seed", type=int, default=0, help="initial random seed.")
     argparser.add_argument("--n-runs", type=int, default=10)
     argparser.add_argument("--n-epochs", type=int, default=2000)
     argparser.add_argument(
