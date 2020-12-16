@@ -421,6 +421,7 @@ class GATHAConv(nn.Module):
         K=3,
         num_heads=1,
         feat_drop=0.0,
+        edge_drop=0.0,
         attn_drop=0.0,
         negative_slope=0.2,
         residual=False,
@@ -444,6 +445,7 @@ class GATHAConv(nn.Module):
         self.hop_attn_r = nn.Parameter(torch.FloatTensor(size=(1, num_heads, out_feats)))
         self.feat_drop = nn.Dropout(feat_drop)
         self.attn_drop = nn.Dropout(attn_drop)
+        self.edge_drop = edge_drop
         self.leaky_relu = nn.LeakyReLU(negative_slope)
         if residual:
             if self._in_dst_feats != out_feats:
@@ -492,17 +494,33 @@ class GATHAConv(nn.Module):
             graph.apply_edges(fn.u_add_v("el", "er", "e"))
             e = self.leaky_relu(graph.edata.pop("e"))
             # compute softmax
-            if self._norm in ['both', 'gat']:
-                a_src = edge_softmax(graph, e, norm_by='src').clamp(min=1e-10)
-                a_dst = edge_softmax(graph, e, norm_by='dst').clamp(min=1e-10)
-                
-                # # print(a_dst.max(), a_src.max())
-                a_dst = torch.pow(a_dst, torch.sigmoid(self.sigma))
-                a_src = torch.pow(a_src, 1 - torch.sigmoid(self.sigma))
-                graph.edata["a"] = self.attn_drop(a_dst * a_src)
-            
+            if self.training and self.edge_drop > 0:
+                perm = torch.randperm(graph.number_of_edges(), device=e.device)
+                bound = int(graph.number_of_edges() * self.edge_drop)
+                eids = perm[bound:]
+                graph.edata["a"] = torch.zeros_like(e)
+                if self._norm in ['both', 'gat']:
+                    a_src = edge_softmax(graph, e[eids], eids=eids, norm_by='src').clamp(min=1e-10)
+                    a_dst = edge_softmax(graph, e[eids], eids=eids, norm_by='dst').clamp(min=1e-10)
+                    
+                    # # print(a_dst.max(), a_src.max())
+                    a_dst = torch.pow(a_dst, torch.sigmoid(self.sigma))
+                    a_src = torch.pow(a_src, 1 - torch.sigmoid(self.sigma))
+                    graph.edata["a"][eids] = self.attn_drop(a_dst * a_src)
+                else:
+                    graph.edata["a"][eids] = self.attn_drop(edge_softmax(graph, e[eids], eids=eids))
             else:
-                graph.edata["a"] = self.attn_drop(edge_softmax(graph, e, norm_by='dst'))
+                if self._norm in ['both', 'gat']:
+                    a_src = edge_softmax(graph, e, norm_by='src').clamp(min=1e-10)
+                    a_dst = edge_softmax(graph, e, norm_by='dst').clamp(min=1e-10)
+                    
+                    # # print(a_dst.max(), a_src.max())
+                    a_dst = torch.pow(a_dst, torch.sigmoid(self.sigma))
+                    a_src = torch.pow(a_src, 1 - torch.sigmoid(self.sigma))
+                    graph.edata["a"] = self.attn_drop(a_dst * a_src)
+                
+                else:
+                    graph.edata["a"] = self.attn_drop(edge_softmax(graph, e, norm_by='dst'))
 
             for k in range(self._K):
                 
@@ -553,7 +571,7 @@ class GATHAConv(nn.Module):
 
 class GATHA(nn.Module):
     def __init__(
-        self, in_feats, n_classes, n_hidden, n_layers, n_heads, activation, K=3, dropout=0.0, feat_drop=0.0, attn_drop=0.0, norm='both'
+        self, in_feats, n_classes, n_hidden, n_layers, n_heads, activation, K=3, dropout=0.0, input_drop=0.0, edge_drop=0.0, attn_drop=0.0, norm='both'
     ):
         super().__init__()
         self.in_feats = in_feats
@@ -573,7 +591,7 @@ class GATHA(nn.Module):
             # in_channels = n_heads if i > 0 else 1
             out_channels = n_heads
 
-            self.convs.append(GATHAConv(in_hidden, out_hidden, K=K, num_heads=n_heads, feat_drop=feat_drop, attn_drop=attn_drop, norm=norm))
+            self.convs.append(GATHAConv(in_hidden, out_hidden, K=K, num_heads=n_heads, edge_drop=edge_drop, attn_drop=attn_drop, norm=norm))
 
             self.linear.append(nn.Linear(in_hidden, out_channels * out_hidden, bias=False))
             if i < n_layers - 1:
@@ -581,7 +599,7 @@ class GATHA(nn.Module):
 
         self.bias_last = Bias(n_classes)
 
-        self.dropout0 = nn.Dropout(min(0.1, dropout))
+        self.dropout0 = nn.Dropout(input_drop)
         self.dropout = nn.Dropout(dropout)
         self.activation = activation
 

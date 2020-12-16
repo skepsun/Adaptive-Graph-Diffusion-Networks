@@ -37,7 +37,8 @@ def gen_model(args):
             n_heads=args.n_heads,
             activation=F.relu,
             dropout=args.dropout,
-            feat_drop=args.feat_drop,
+            input_drop=args.input_drop,
+            edge_drop=args.edge_drop,
             attn_drop=args.attn_drop,
             norm=norm
         )
@@ -51,7 +52,8 @@ def gen_model(args):
             n_heads=args.n_heads,
             activation=F.relu,
             dropout=args.dropout,
-            feat_drop=args.feat_drop,
+            input_drop=args.input_drop,
+            edge_drop=args.edge_drop,
             attn_drop=args.attn_drop,
             norm=norm
         )
@@ -263,7 +265,8 @@ def main():
     argparser.add_argument("--n-heads", type=int, default=1)
     argparser.add_argument("--n-hidden", type=int, default=256)
     argparser.add_argument("--dropout", type=float, default=0.5)
-    argparser.add_argument("--feat_drop", type=float, default=0.1)
+    argparser.add_argument("--input_drop", type=float, default=0.0)
+    argparser.add_argument("--edge_drop", type=float, default=0.0)
     argparser.add_argument("--attn_drop", type=float, default=0.05)
     argparser.add_argument("--wd", type=float, default=0)
     argparser.add_argument("--log-every", type=int, default=20)
@@ -280,15 +283,17 @@ def main():
     data = DglNodePropPredDataset(name="ogbn-arxiv", root="../dataset")
     evaluator = Evaluator(name="ogbn-arxiv")
 
-    logger = get_logger("{}lr_{}_n_layers_{}_K_{}_n_heads_{}_n_hidden_{}_norm_{}_dropout_{}_feat_drop_{}_attn_drop_{}_use_label_{}.log".format(
+    logger = get_logger("{}seed_{}_n_label_iters_{}_lr_{}_n_layers_{}_K_{}_n_heads_{}_n_hidden_{}_norm_{}_dropout_{}_input_drop_{}_edge_drop_{}_attn_drop_{}_use_label_{}.log".format(
                         args.log_path,
+                        args.seed,
+                        args.n_label_iters,
                         args.lr, 
                         args.n_layers, 
                         args.K, 
                         args.n_heads, 
                         args.n_hidden,
                         args.norm, 
-                        args.dropout, args.feat_drop, args.attn_drop, args.use_labels))
+                        args.dropout, args.input_drop, args.edge_drop, args.attn_drop, args.use_labels))
 
     splitted_idx = data.get_idx_split()
     train_idx, val_idx, test_idx = splitted_idx["train"], splitted_idx["valid"], splitted_idx["test"]
