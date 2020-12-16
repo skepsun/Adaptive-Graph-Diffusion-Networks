@@ -90,12 +90,12 @@ def adjust_learning_rate(optimizer, lr, epoch):
             param_group["lr"] = lr * epoch / 50
 
 
-def train(model, graph, labels, train_idx, optimizer, use_labels):
+def train(args, model, graph, labels, train_idx, val_idx, test_idx, optimizer):
     model.train()
 
     feat = graph.ndata["feat"]
 
-    if use_labels:
+    if args.use_labels:
         mask_rate = 0.5
         mask = th.rand(train_idx.shape) < mask_rate
 
@@ -111,6 +111,13 @@ def train(model, graph, labels, train_idx, optimizer, use_labels):
 
     optimizer.zero_grad()
     pred = model(graph, feat)
+    if args.n_label_iters > 0:
+        unlabel_idx = th.cat([train_pred_idx, val_idx, test_idx])
+        for _ in range(args.n_label_iters):
+            pred = pred.detach()
+            th.cuda.empty_cache()
+            feat[unlabel_idx, -n_classes:] = F.softmax(pred[unlabel_idx], dim=-1)
+            pred = model(graph, feat)
     loss = cross_entropy(pred[train_pred_idx], labels[train_pred_idx])
     loss.backward()
     optimizer.step()
@@ -161,7 +168,7 @@ def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running,
 
         # adjust_learning_rate(optimizer, args.lr, epoch)
 
-        loss, pred = train(model, graph, labels, train_idx, optimizer, args.use_labels)
+        loss, pred = train(args, model, graph, labels, train_idx, val_idx, test_idx, optimizer)
         acc = compute_acc(pred[train_idx], labels[train_idx], evaluator)
 
         train_acc, val_acc, test_acc, train_loss, val_loss, test_loss = evaluate(
@@ -248,6 +255,7 @@ def main():
     argparser.add_argument(
         "--use-labels", action="store_true", help="Use labels in the training set as input features."
     )
+    argparser.add_argument("--n-label-iters", type=int, default=0, help="number of label iterations")
     argparser.add_argument("--norm", type=str, help="Choices of normalization methods. values=['none','gcn','gat','both']", default='none')
     argparser.add_argument("--lr", type=float, default=0.002)
     argparser.add_argument("--n-layers", type=int, default=3)
