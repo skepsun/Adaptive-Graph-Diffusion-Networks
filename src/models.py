@@ -7,6 +7,40 @@ from dgl.nn.pytorch.utils import Identity
 from dgl.ops import edge_softmax
 from dgl.utils import expand_as_pair
 
+# implementation from @Espylapiza
+class ElementWiseLinear(nn.Module):
+    def __init__(self, size, weight=True, bias=True, inplace=False):
+        super().__init__()
+        if weight:
+            self.weight = nn.Parameter(torch.Tensor(size))
+        else:
+            self.weight = None
+        if bias:
+            self.bias = nn.Parameter(torch.Tensor(size))
+        else:
+            self.bias = None
+        self.inplace = inplace
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        if self.weight is not None:
+            nn.init.ones_(self.weight)
+        if self.bias is not None:
+            nn.init.zeros_(self.bias)
+
+    def forward(self, x):
+        if self.inplace:
+            if self.weight is not None:
+                x.mul_(self.weight)
+            if self.bias is not None:
+                x.add_(self.bias)
+        else:
+            if self.weight is not None:
+                x = x * self.weight
+            if self.bias is not None:
+                x = x + self.bias
+        return x
 
 class Bias(nn.Module):
     def __init__(self, size):
@@ -424,6 +458,7 @@ class GATHAConv(nn.Module):
         edge_drop=0.0,
         attn_drop=0.0,
         negative_slope=0.2,
+        use_attn_dst=True,
         residual=False,
         activation=None,
         allow_zero_in_degree=False,
@@ -439,7 +474,10 @@ class GATHAConv(nn.Module):
 
         self.sigma = nn.Parameter(torch.FloatTensor(size=(1,)))
         self.attn_l = nn.Parameter(torch.FloatTensor(size=(1, num_heads, out_feats)))
-        self.attn_r = nn.Parameter(torch.FloatTensor(size=(1, num_heads, out_feats)))
+        if use_attn_dst:
+            self.attn_r = nn.Parameter(torch.FloatTensor(size=(1, num_heads, out_feats)))
+        else:
+            self.register_buffer("attn_r", None)
         self.fc = nn.Linear(self._in_src_feats, out_feats * num_heads, bias=False)
         self.hop_attn_l = nn.Parameter(torch.FloatTensor(size=(1, num_heads, out_feats)))
         self.hop_attn_r = nn.Parameter(torch.FloatTensor(size=(1, num_heads, out_feats)))
@@ -448,10 +486,7 @@ class GATHAConv(nn.Module):
         self.edge_drop = edge_drop
         self.leaky_relu = nn.LeakyReLU(negative_slope)
         if residual:
-            if self._in_dst_feats != out_feats:
-                self.res_fc = nn.Linear(self._in_dst_feats, num_heads * out_feats, bias=False)
-            else:
-                self.res_fc = Identity()
+            self.res_fc = nn.Linear(self._in_dst_feats, num_heads * out_feats, bias=False)
         else:
             self.register_buffer("res_fc", None)
         self.reset_parameters()
@@ -459,13 +494,14 @@ class GATHAConv(nn.Module):
 
     def reset_parameters(self):
         gain = nn.init.calculate_gain("relu")
-        nn.init.xavier_normal_(self.attn_l, gain=gain)
-        nn.init.xavier_normal_(self.attn_r, gain=gain)
         if hasattr(self, "fc"):
             nn.init.xavier_normal_(self.fc.weight, gain=gain)
         else:
             nn.init.xavier_normal_(self.fc_src.weight, gain=gain)
             nn.init.xavier_normal_(self.fc_dst.weight, gain=gain)
+        nn.init.xavier_normal_(self.attn_l, gain=gain)
+        if isinstance(self.attn_r, nn.Parameter):
+            nn.init.xavier_normal_(self.attn_r, gain=gain)
         nn.init.xavier_normal_(self.hop_attn_l, gain=gain)
         nn.init.xavier_normal_(self.hop_attn_r, gain=gain)
         if isinstance(self.res_fc, nn.Linear):
@@ -480,19 +516,25 @@ class GATHAConv(nn.Module):
             if not self._allow_zero_in_degree:
                 if (graph.in_degrees() == 0).any():
                     assert False
-
-            h = self.fc(self.feat_drop(feat)).view(-1, self._num_heads, self._out_feats)
+            feat = self.feat_drop(feat)
+            h = self.fc(feat).view(-1, self._num_heads, self._out_feats)
             hstack = [h]
 
             feat_src = h
             
             el = (feat_src * self.attn_l).sum(-1).unsqueeze(-1)
-            er = (feat_src * self.attn_r).sum(-1).unsqueeze(-1)
-            graph.srcdata.update({"el": el})
-            graph.dstdata.update({"er": er})
+            # er = (feat_src * self.attn_r).sum(-1).unsqueeze(-1)
+            graph.srcdata.update({"ft": feat_src, "el": el})
+            # graph.dstdata.update({"er": er})
             # compute edge attention, el and er are a_l Wh_i and a_r Wh_j respectively.
-            graph.apply_edges(fn.u_add_v("el", "er", "e"))
+            if self.attn_r is not None:
+                er = (feat_dst * self.attn_r).sum(dim=-1).unsqueeze(-1)
+                graph.dstdata.update({"er": er})
+                graph.apply_edges(fn.u_add_v("el", "er", "e"))
+            else:
+                graph.apply_edges(fn.copy_u("el", "e"))
             e = self.leaky_relu(graph.edata.pop("e"))
+            
             # compute softmax
             if self.training and self.edge_drop > 0:
                 perm = torch.randperm(graph.number_of_edges(), device=e.device)
@@ -562,7 +604,7 @@ class GATHAConv(nn.Module):
 
             # residual
             if self.res_fc is not None:
-                resval = self.res_fc(h).view(h.shape[0], -1, self._out_feats)
+                resval = self.res_fc(feat).view(h.shape[0], -1, self._out_feats)
                 rst = rst + resval
             # activation
             if self._activation is not None:
@@ -571,7 +613,20 @@ class GATHAConv(nn.Module):
 
 class GATHA(nn.Module):
     def __init__(
-        self, in_feats, n_classes, n_hidden, n_layers, n_heads, activation, K=3, dropout=0.0, input_drop=0.0, edge_drop=0.0, attn_drop=0.0, norm='both'
+        self, 
+        in_feats, 
+        n_classes, 
+        n_hidden, 
+        n_layers, 
+        n_heads, 
+        activation, 
+        K=3, 
+        dropout=0.0, 
+        input_drop=0.0, 
+        edge_drop=0.0, 
+        attn_drop=0.0, 
+        use_attn_dst=True,
+        norm='both'
     ):
         super().__init__()
         self.in_feats = in_feats
@@ -581,42 +636,51 @@ class GATHA(nn.Module):
         self.num_heads = n_heads
 
         self.convs = nn.ModuleList()
-        self.linear = nn.ModuleList()
         self.bns = nn.ModuleList()
-        self.biases = nn.ModuleList()
 
         for i in range(n_layers):
             in_hidden = n_heads * n_hidden if i > 0 else in_feats
             out_hidden = n_hidden if i < n_layers - 1 else n_classes
             # in_channels = n_heads if i > 0 else 1
+            num_heads = n_heads if i < n_layers - 1 else 1
             out_channels = n_heads
 
-            self.convs.append(GATHAConv(in_hidden, out_hidden, K=K, num_heads=n_heads, edge_drop=edge_drop, attn_drop=attn_drop, norm=norm))
+            self.convs.append(
+                GATHAConv(
+                    in_hidden, 
+                    out_hidden, 
+                    K=K, 
+                    num_heads=num_heads, 
+                    edge_drop=edge_drop, 
+                    attn_drop=attn_drop, 
+                    use_attn_dst=use_attn_dst,
+                    norm=norm,
+                    residual=True,
+                )
+            )
 
-            self.linear.append(nn.Linear(in_hidden, out_channels * out_hidden, bias=False))
             if i < n_layers - 1:
                 self.bns.append(nn.BatchNorm1d(out_channels * out_hidden))
 
-        self.bias_last = Bias(n_classes)
+        self.bias_last = ElementWiseLinear(n_classes, weight=False, bias=True, inplace=True)
 
-        self.dropout0 = nn.Dropout(input_drop)
+        self.input_dropout = nn.Dropout(input_drop)
         self.dropout = nn.Dropout(dropout)
         self.activation = activation
 
     def forward(self, graph, feat):
         h = feat
-        h = self.dropout0(h)
+        h = self.input_dropout(h)
 
         for i in range(self.n_layers):
             conv = self.convs[i](graph, h)
-            linear = self.linear[i](h).view(conv.shape)
 
-            h = conv + linear
+            h = conv
 
             if i < self.n_layers - 1:
                 h = h.flatten(1)
                 h = self.bns[i](h)
-                h = self.activation(h)
+                h = self.activation(h, inplace=True)
                 h = self.dropout(h)
 
         h = h.mean(1)

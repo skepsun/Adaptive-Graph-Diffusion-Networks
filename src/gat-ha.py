@@ -40,7 +40,8 @@ def gen_model(args):
             input_drop=args.input_drop,
             edge_drop=args.edge_drop,
             attn_drop=args.attn_drop,
-            norm=norm
+            use_attn_dst=args.no_attn_dst,
+            norm=norm,
         )
     else:
         model = GATHA(
@@ -55,7 +56,8 @@ def gen_model(args):
             input_drop=args.input_drop,
             edge_drop=args.edge_drop,
             attn_drop=args.attn_drop,
-            norm=norm
+            use_attn_dst=args.no_attn_dst,
+            norm=norm,
         )
 
     return model
@@ -98,16 +100,14 @@ def train(args, model, graph, labels, train_idx, val_idx, test_idx, optimizer):
     feat = graph.ndata["feat"]
 
     if args.use_labels:
-        mask_rate = 0.5
-        mask = th.rand(train_idx.shape) < mask_rate
+        mask = th.rand(train_idx.shape) < args.mask_rate
 
         train_labels_idx = train_idx[mask]
         train_pred_idx = train_idx[~mask]
 
         feat = add_labels(feat, labels, train_labels_idx)
     else:
-        mask_rate = 0.5
-        mask = th.rand(train_idx.shape) < mask_rate
+        mask = th.rand(train_idx.shape) < args.mask_rate
 
         train_pred_idx = train_idx[mask]
 
@@ -257,7 +257,9 @@ def main():
     argparser.add_argument(
         "--use-labels", action="store_true", help="Use labels in the training set as input features."
     )
+    argparser.add_argument("--mask-rate", type=float, default=0.5, help="mask rate")
     argparser.add_argument("--n-label-iters", type=int, default=0, help="number of label iterations")
+    argparser.add_argument("--no-attn-dst", action="store_true", help="Don't use attn_dst.")
     argparser.add_argument("--norm", type=str, help="Choices of normalization methods. values=['none','gcn','gat','both']", default='none')
     argparser.add_argument("--lr", type=float, default=0.002)
     argparser.add_argument("--n-layers", type=int, default=3)
@@ -283,17 +285,19 @@ def main():
     data = DglNodePropPredDataset(name="ogbn-arxiv", root="../dataset")
     evaluator = Evaluator(name="ogbn-arxiv")
 
-    logger = get_logger("{}seed_{}_n_label_iters_{}_lr_{}_n_layers_{}_K_{}_n_heads_{}_n_hidden_{}_norm_{}_dropout_{}_input_drop_{}_edge_drop_{}_attn_drop_{}_use_label_{}.log".format(
+    logger = get_logger("{}seed_{}_n_label_iters_{}_no_attn_dst_{}_lr_{}_n_layers_{}_K_{}_n_heads_{}_n_hidden_{}_norm_{}_dropout_{}_input_drop_{}_edge_drop_{}_attn_drop_{}_use_label_{}.log".format(
                         args.log_path,
                         args.seed,
                         args.n_label_iters,
+                        args.no_attn_dst,
                         args.lr, 
                         args.n_layers, 
                         args.K, 
                         args.n_heads, 
                         args.n_hidden,
                         args.norm, 
-                        args.dropout, args.input_drop, args.edge_drop, args.attn_drop, args.use_labels))
+                        args.dropout, args.input_drop, args.edge_drop, args.attn_drop, 
+                        args.use_labels))
 
     splitted_idx = data.get_idx_split()
     train_idx, val_idx, test_idx = splitted_idx["train"], splitted_idx["valid"], splitted_idx["test"]
