@@ -528,7 +528,7 @@ class GATHAConv(nn.Module):
             # graph.dstdata.update({"er": er})
             # compute edge attention, el and er are a_l Wh_i and a_r Wh_j respectively.
             if self.attn_r is not None:
-                er = (feat_dst * self.attn_r).sum(dim=-1).unsqueeze(-1)
+                er = (feat_src * self.attn_r).sum(dim=-1).unsqueeze(-1)
                 graph.dstdata.update({"er": er})
                 graph.apply_edges(fn.u_add_v("el", "er", "e"))
             else:
