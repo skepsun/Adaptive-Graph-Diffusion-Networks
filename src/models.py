@@ -758,6 +758,8 @@ class SGATHAConv(nn.Module):
             feat_src = feat_dst = h
             
             a_l = (feat_src * self.hop_attn_l).sum(dim=-1).unsqueeze(-1)
+            den = 0
+            rst = 0
 
             el = (feat_src * self.attn_l).sum(-1).unsqueeze(-1)
             er = (feat_src * self.attn_r).sum(-1).unsqueeze(-1)
@@ -786,11 +788,16 @@ class SGATHAConv(nn.Module):
                         shp = norm.shape + (1,) * (feat_dst.dim() - 1)
                         norm = torch.reshape(norm, shp)
                         feat_src = feat_src * norm
-                # a_r = (feat_src * self.hop_attn_r).sum(dim=-1).unsqueeze(-1)
-                # a = torch.cat([(a_l + a_l).unsqueeze(-1).mean(0).unsqueeze(0), (a_l + a_r).unsqueeze(-1).mean(0).unsqueeze(0)], dim=-1)
-                # a = self.leaky_relu(a)
+                a_r = (feat_src * self.hop_attn_r).sum(dim=-1).unsqueeze(-1)
+                a = a_l + a_r
+                a = self.leaky_relu(a)
+                a = (a - a.min(0)[0]) / (a.max(0)[0] - a.min(0)[0])
+                a = torch.exp(a)
                 # a = torch.nn.functional.softmax(a, dim=-1)
-                # feat_src = h * a[:,:,:,0] + feat_src * a[:,:,:,1]
+                rst += feat_src * a
+                den += a
+
+            rst /= den
 
             # feat_src = h
             # fstack_dst = hstack

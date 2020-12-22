@@ -251,7 +251,7 @@ def main():
         device = th.device("cuda:%d" % args.gpu)
 
     # load data
-    data = DglNodePropPredDataset(name="ogbn-arxiv")
+    data = DglNodePropPredDataset(name="ogbn-arxiv", root="../dataset")
     evaluator = Evaluator(name="ogbn-arxiv")
 
     splitted_idx = data.get_idx_split()

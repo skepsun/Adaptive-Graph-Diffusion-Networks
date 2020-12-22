@@ -168,7 +168,7 @@ def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running,
     for epoch in range(1, args.n_epochs + 1):
         tic = time.time()
 
-        # adjust_learning_rate(optimizer, args.lr, epoch)
+        adjust_learning_rate(optimizer, args.lr, epoch)
 
         loss, pred = train(args, model, graph, labels, train_idx, val_idx, test_idx, optimizer)
         acc = compute_acc(pred[train_idx], labels[train_idx], evaluator)
