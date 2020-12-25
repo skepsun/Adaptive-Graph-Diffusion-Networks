@@ -285,19 +285,13 @@ def main():
     data = DglNodePropPredDataset(name="ogbn-arxiv", root="../dataset")
     evaluator = Evaluator(name="ogbn-arxiv")
 
-    logger = get_logger("{}seed_{}_n_label_iters_{}_no_attn_dst_{}_lr_{}_n_layers_{}_K_{}_n_heads_{}_n_hidden_{}_norm_{}_dropout_{}_input_drop_{}_edge_drop_{}_attn_drop_{}_use_label_{}.log".format(
-                        args.log_path,
-                        args.seed,
-                        args.n_label_iters,
-                        args.no_attn_dst,
-                        args.lr, 
-                        args.n_layers, 
-                        args.K, 
-                        args.n_heads, 
-                        args.n_hidden,
-                        args.norm, 
-                        args.dropout, args.input_drop, args.edge_drop, args.attn_drop, 
-                        args.use_labels))
+    args_dict = dict(args._get_kwargs())
+    exclude_names = ['cpu' ,'gpu', 'log_every', 'log_path', 'plot_curves']
+    logger_args = []
+    for u,v in args_dict.items():
+        if u not in exclude_names:
+            logger_args.extend([u, str(v)])
+    logger = get_logger(os.path.join(args.log_path, "_".join(logger_args) + ".log"))
 
     splitted_idx = data.get_idx_split()
     train_idx, val_idx, test_idx = splitted_idx["train"], splitted_idx["valid"], splitted_idx["test"]
