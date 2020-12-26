@@ -759,7 +759,8 @@ class SGATHAConv(nn.Module):
                 if (graph.in_degrees() == 0).any():
                     assert False
 
-            h = self.fc(self.feat_drop(feat)).view(-1, self._num_heads, self._out_feats)
+            feat = self.feat_drop(feat)
+            h = self.fc(feat).view(-1, self._num_heads, self._out_feats)
             # hstack = [h]
 
             feat_src = feat_dst = h
@@ -795,10 +796,9 @@ class SGATHAConv(nn.Module):
                         shp = norm.shape + (1,) * (feat_dst.dim() - 1)
                         norm = torch.reshape(norm, shp)
                         feat_src = feat_src * norm
-                a_r = (feat_src * self.hop_attn_r).sum(dim=-1).unsqueeze(-1)
-                a = a_l + a_r
-                a = self.leaky_relu(a)
-                a = (a - a.min(0)[0]) / (a.max(0)[0] - a.min(0)[0])
+                a = a_l + (feat_src * self.hop_attn_r).sum(dim=-1).unsqueeze(-1)
+                # a = self.leaky_relu(a)
+                a = (a - a.mean(0)) / a.std(0)
                 a = torch.exp(a)
                 # a = torch.nn.functional.softmax(a, dim=-1)
                 rst += feat_src * a
@@ -824,7 +824,7 @@ class SGATHAConv(nn.Module):
             # residual
             rst = feat_src
             if self.res_fc is not None:
-                resval = self.res_fc(h).view(h.shape[0], -1, self._out_feats)
+                resval = self.res_fc(feat).view(feat.shape[0], -1, self._out_feats)
                 rst = rst + resval
             # activation
             if self._activation is not None:
@@ -833,7 +833,7 @@ class SGATHAConv(nn.Module):
 
 class SGATHA(nn.Module):
     def __init__(
-        self, in_feats, n_classes, n_hidden, n_layers, n_heads, activation, K=3, dropout=0.0, attn_drop=0.0, norm='both'
+        self, in_feats, n_classes, n_hidden, n_layers, n_heads, activation, K=3, dropout=0.0, input_drop=0.0, attn_drop=0.0, norm='both'
     ):
         super().__init__()
         self.in_feats = in_feats
@@ -843,9 +843,7 @@ class SGATHA(nn.Module):
         self.num_heads = n_heads
 
         self.convs = nn.ModuleList()
-        self.linear = nn.ModuleList()
         self.bns = nn.ModuleList()
-        self.biases = nn.ModuleList()
 
         for i in range(n_layers):
             in_hidden = n_heads * n_hidden if i > 0 else in_feats
@@ -853,32 +851,30 @@ class SGATHA(nn.Module):
             # in_channels = n_heads if i > 0 else 1
             out_channels = n_heads
 
-            self.convs.append(SGATHAConv(in_hidden, out_hidden, K=K, num_heads=n_heads, attn_drop=attn_drop, norm=norm))
+            self.convs.append(SGATHAConv(in_hidden, out_hidden, K=K, num_heads=n_heads, attn_drop=attn_drop, norm=norm, residual=True))
 
-            self.linear.append(nn.Linear(in_hidden, out_channels * out_hidden, bias=False))
             if i < n_layers - 1:
                 self.bns.append(nn.BatchNorm1d(out_channels * out_hidden))
 
-        self.bias_last = Bias(n_classes)
+        self.bias_last = ElementWiseLinear(n_classes, weight=False, bias=True, inplace=True)
 
-        self.dropout0 = nn.Dropout(min(0.1, dropout))
+        self.input_dropout = nn.Dropout(input_drop)
         self.dropout = nn.Dropout(dropout)
         self.activation = activation
 
     def forward(self, graph, feat):
         h = feat
-        h = self.dropout0(h)
+        h = self.input_dropout(h)
 
         for i in range(self.n_layers):
             conv = self.convs[i](graph, h)
-            linear = self.linear[i](h).view(conv.shape)
 
-            h = conv + linear
+            h = conv
 
             if i < self.n_layers - 1:
                 h = h.flatten(1)
                 h = self.bns[i](h)
-                h = self.activation(h)
+                h = self.activation(h, inplace=True)
                 h = self.dropout(h)
 
         h = h.mean(1)
