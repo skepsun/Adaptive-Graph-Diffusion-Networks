@@ -1,9 +1,10 @@
-/src/__pycache__/
-/dataset/
+/ogbn-arxiv/src/__pycache__/
+/ogbn-arxiv/dataset/
+__pycache__/*
+dataset/*
 nohup.*
 *.out
 *.log
 /.vscode/
 /.idea/
 *.zip
-
