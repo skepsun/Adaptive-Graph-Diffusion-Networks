@@ -11,20 +11,24 @@ from dataset import load_dataset
 import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-class FeedForwardNet(nn.Module):
-    def __init__(self, in_feats, hidden, out_feats, n_layers, dropout):
-        super(FeedForwardNet, self).__init__()
+class MLP(nn.Module):
+    def __init__(self, in_feats, hidden, out_feats, n_layers, dropout, bias=True):
+        super(MLP, self).__init__()
         self.layers = nn.ModuleList()
+        self.bns = nn.ModuleList()
         self.n_layers = n_layers
+        self.rec_layers = nn.ModuleList()
         if n_layers == 1:
-            self.layers.append(nn.Linear(in_feats, out_feats))
+            self.layers.append(nn.Linear(in_feats, out_feats, bias=bias))
         else:
-            self.layers.append(nn.Linear(in_feats, hidden))
+            self.layers.append(nn.Linear(in_feats, hidden, bias=bias))
+            self.bns.append(nn.BatchNorm1d(hidden))
             for i in range(n_layers - 2):
-                self.layers.append(nn.Linear(hidden, hidden))
-            self.layers.append(nn.Linear(hidden, out_feats))
+                self.layers.append(nn.Linear(hidden, hidden, bias=bias))
+                self.bns.append(nn.BatchNorm1d(hidden))
+            self.layers.append(nn.Linear(hidden, out_feats, bias=bias))
         if self.n_layers > 1:
-            self.prelu = nn.PReLU()
+            self.relu = nn.ReLU(inplace=True)
             self.dropout = nn.Dropout(dropout)
         self.reset_parameters()
 
@@ -32,13 +36,16 @@ class FeedForwardNet(nn.Module):
         gain = nn.init.calculate_gain("relu")
         for layer in self.layers:
             nn.init.xavier_uniform_(layer.weight, gain=gain)
-            nn.init.zeros_(layer.bias)
+            if layer.bias != None:
+                nn.init.zeros_(layer.bias)
+        for bn in self.bns:
+            bn.reset_parameters()
 
     def forward(self, x):
         for layer_id, layer in enumerate(self.layers):
             x = layer(x)
             if layer_id < self.n_layers - 1:
-                x = self.dropout(self.prelu(x))
+                x = self.dropout(self.relu(self.bns[layer_id](x)))
         return x
 
 
@@ -50,22 +57,22 @@ class AGDN(nn.Module):
         self._hidden = hidden
         self._out_feats = out_feats
         self.dropout = nn.Dropout(dropout)
-        self.prelu = nn.PReLU()
-        self.inception_ffs = nn.ModuleList()
+        self.bn = nn.BatchNorm1d(hidden)
+        # self.bns = nn.ModuleList([nn.BatchNorm1d(hidden * num_heads) for i in range(num_hops)])
+        self.relu = nn.ReLU(inplace=True)
         self.input_drop = nn.Dropout(input_drop)
-        for hop in range(num_hops):
-            self.inception_ffs.append(
-                FeedForwardNet(in_feats, None, hidden * num_heads, 1, dropout))
+        self.fc = nn.Linear(in_feats, hidden * num_heads, bias=False)
+        self.res_fc = nn.Linear(in_feats, hidden * num_heads, bias=False)
         self.hop_attn_l = nn.Parameter(torch.FloatTensor(size=(1, num_heads, hidden)))
         self.hop_attn_r = nn.Parameter(torch.FloatTensor(size=(1, num_heads, hidden)))
         self.leaky_relu = nn.LeakyReLU(negative_slope)
-        self.mlp = FeedForwardNet(hidden, hidden, out_feats, n_layers, dropout)
+        self.mlp = MLP(hidden, hidden, out_feats, n_layers, dropout, bias=True)
 
     def forward(self, feats):
         feats = [self.input_drop(feat) for feat in feats]
         hidden = []
-        for feat, ff in zip(feats, self.inception_ffs):
-            hidden.append(ff(feat).view(-1, self._num_heads, self._hidden))
+        for i in range(len(feats)):
+            hidden.append(self.fc(feats[i]).view(-1, self._num_heads, self._hidden))
         astack_l = [(feat * self.hop_attn_l).sum(dim=-1).unsqueeze(-1) for feat in hidden]
         a_r = hidden[0] * self.hop_attn_r
         astack = torch.cat([(a_l + a_r).unsqueeze(-1) for a_l in astack_l], dim=-1)
@@ -74,18 +81,21 @@ class AGDN(nn.Module):
         out = 0
         for i in range(a.shape[-1]):
             out += hidden[i] * a[:, :, :, i]
+        out += self.res_fc(feats[0]).view(-1, self._num_heads, self._hidden)
         out = out.mean(1)
-        print(out[0,:])
-        out = self.mlp(self.dropout(self.prelu(out)))
+        # print(out[0,:])
+        out = self.mlp(self.dropout(self.relu(out)))
         return out
 
     def reset_parameters(self):
         gain = nn.init.calculate_gain("relu")
-        for ff in self.inception_ffs:
-            ff.reset_parameters()
+        nn.init.xavier_normal_(self.fc.weight, gain=gain)
+        nn.init.xavier_normal_(self.res_fc.weight, gain=gain)
         nn.init.xavier_normal_(self.hop_attn_l, gain=gain)
         nn.init.xavier_normal_(self.hop_attn_r, gain=gain)
         self.mlp.reset_parameters()
+        # for bn in self.bns:
+        # self.bn.reset_parameters()
 
 
 def get_n_params(model):
@@ -104,9 +114,17 @@ def neighbor_average_features(g, args):
     """
     print("Compute neighbor-averaged feats")
     g.ndata["feat_0"] = g.ndata["feat"]
+    # degs = g.out_degrees().float().clamp(min=1)
+    # norm = torch.pow(degs, -0.5)
+    # shp = norm.shape + (1,) * (g.ndata["feat"].dim() - 1)
+    # norm = torch.reshape(norm, shp)
+    # print(g.ndata["feat"].shape)
+    # print(norm.shape)
     for hop in range(1, args.R + 1):
-        g.update_all(fn.copy_u(f"feat_{hop-1}", "msg"),
-                     fn.mean("msg", f"feat_{hop}"))
+        g.ndata["feat"] = g.ndata[f"feat_{hop-1}"] 
+        g.update_all(fn.copy_src(src="feat", out="msg"),
+                     fn.mean(msg="msg", out="feat"))
+        g.ndata[f"feat_{hop}"] = g.ndata["feat"] 
     res = []
     for hop in range(args.R + 1):
         res.append(g.ndata.pop(f"feat_{hop}"))
@@ -184,7 +202,7 @@ def run(args, data, device):
     # Initialize model and optimizer for each run
     num_hops = args.R + 1
     model = AGDN(in_size, args.num_hidden, num_classes, num_hops,
-                 args.ff_layer, args.num_heads, args.dropout, args.input_dropout)
+                 args.mlp_layer, args.num_heads, args.dropout, args.input_dropout)
     model = model.to(device)
     print("# Params:", get_n_params(model))
 
@@ -256,7 +274,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=50000)
     parser.add_argument("--eval-batch-size", type=int, default=100000,
                         help="evaluation batch size")
-    parser.add_argument("--ff-layer", type=int, default=3,
+    parser.add_argument("--mlp-layer", type=int, default=3,
                         help="number of feed-forward layers")
     parser.add_argument("--num-heads", type=int, default=2)
     parser.add_argument("--input-dropout", type=float, default=0,
