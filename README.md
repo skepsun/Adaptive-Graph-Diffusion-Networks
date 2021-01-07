@@ -4,6 +4,10 @@ The preprint paper is here: https://arxiv.org/abs/2012.15024
 
 The framework of training and evaluating is adapted from [dgl's example codes]:(https://github.com/dmlc/dgl/tree/master/examples/pytorch/ogb/ogbn-arxiv) and [Espylapiza's implementation]:(https://github.com/Espylapiza/dgl/tree/master/examples/pytorch/ogb/ogbn-arxiv).
 
+requirements: `torch, dgl, torch_geometric`
+
+## ogbn-arxiv
+
 To reproduce results of GCN-HA:
 
 `python src/gcn-ha.py --seed 0 --lr 0.002 --n-layers 3 --n-hidden 256 --K 3 --n-heads 1 --dropout 0.5 --input_drop 0.1 --attn_drop 0.05 --epochs 2000 --n-runs 10 --use-labels`(with labels)
@@ -37,3 +41,5 @@ Results with using labels:
 | GCN-HA  | 73.39 ± 0.12 |
 | GAT-HA_1_head  | 73.81 ± 0.13 |
 | GAT-HA_3_heads | 73.98 ± 0.09 |
+
+## ogbn-products
