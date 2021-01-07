@@ -4,7 +4,7 @@ The preprint paper is here: https://arxiv.org/abs/2012.15024
 
 The framework of training and evaluating is adapted from [dgl's example codes]:(https://github.com/dmlc/dgl/tree/master/examples/pytorch/ogb/ogbn-arxiv) and [Espylapiza's implementation]:(https://github.com/Espylapiza/dgl/tree/master/examples/pytorch/ogb/ogbn-arxiv).
 
-requirements: `torch, dgl, torch_geometric`
+requirements: `torch, ogb, dgl, torch_geometric`
 
 ## ogbn-arxiv
 
