@@ -1,5 +1,7 @@
 /ogbn-arxiv/src/__pycache__/
 /ogbn-arxiv/dataset/
+/ogbn-products/dataset/
+/ogbn-products/src/__pycache__
 __pycache__/*
 dataset/*
 nohup.*

@@ -36,8 +36,10 @@ class MLP(nn.Module):
         gain = nn.init.calculate_gain("relu")
         for layer in self.layers:
             nn.init.xavier_uniform_(layer.weight, gain=gain)
-            if layer.bias != None:
+            try:
                 nn.init.zeros_(layer.bias)
+            except:
+                pass
         for bn in self.bns:
             bn.reset_parameters()
 
@@ -51,11 +53,12 @@ class MLP(nn.Module):
 
 class AGDN(nn.Module):
     def __init__(self, in_feats, hidden, out_feats, num_hops, n_layers, num_heads,
-                 dropout, input_drop, negative_slope=0.2):
+                 dropout, input_drop, negative_slope=0.2, last_bias=False):
         super(AGDN, self).__init__()
         self._num_heads = num_heads
         self._hidden = hidden
         self._out_feats = out_feats
+        self._last_bias = last_bias
         self.dropout = nn.Dropout(dropout)
         self.bn = nn.BatchNorm1d(hidden)
         # self.bns = nn.ModuleList([nn.BatchNorm1d(hidden * num_heads) for i in range(num_hops)])
@@ -66,7 +69,13 @@ class AGDN(nn.Module):
         self.hop_attn_l = nn.Parameter(torch.FloatTensor(size=(1, num_heads, hidden)))
         self.hop_attn_r = nn.Parameter(torch.FloatTensor(size=(1, num_heads, hidden)))
         self.leaky_relu = nn.LeakyReLU(negative_slope)
-        self.mlp = MLP(hidden, hidden, out_feats, n_layers, dropout, bias=True)
+        if last_bias:
+            self.mlp = MLP(hidden, hidden, out_feats, n_layers, dropout, bias=False)
+            self.bias = nn.Parameter(torch.FloatTensor(size=(1, out_feats)))
+        else:
+            self.mlp = MLP(hidden, hidden, out_feats, n_layers, dropout, bias=True)
+            self.bias = None
+        self.reset_parameters()
 
     def forward(self, feats):
         feats = [self.input_drop(feat) for feat in feats]
@@ -84,7 +93,9 @@ class AGDN(nn.Module):
         out += self.res_fc(feats[0]).view(-1, self._num_heads, self._hidden)
         out = out.mean(1)
         # print(out[0,:])
-        out = self.mlp(self.dropout(self.relu(out)))
+        out = self.mlp(self.dropout(self.relu(self.bn(out))))
+        if self._last_bias:
+            out += self.bias
         return out
 
     def reset_parameters(self):
@@ -96,7 +107,9 @@ class AGDN(nn.Module):
         self.mlp.reset_parameters()
         # for bn in self.bns:
         # self.bn.reset_parameters()
-
+        self.bn.reset_parameters()
+        if self._last_bias:
+            nn.init.zeros_(self.bias)
 
 def get_n_params(model):
     pp = 0
@@ -114,17 +127,25 @@ def neighbor_average_features(g, args):
     """
     print("Compute neighbor-averaged feats")
     g.ndata["feat_0"] = g.ndata["feat"]
-    # degs = g.out_degrees().float().clamp(min=1)
-    # norm = torch.pow(degs, -0.5)
-    # shp = norm.shape + (1,) * (g.ndata["feat"].dim() - 1)
-    # norm = torch.reshape(norm, shp)
+    if args.use_norm:
+        degs = g.out_degrees().float().clamp(min=1)
+        norm = torch.pow(degs, -0.5)
+        shp = norm.shape + (1,) * (g.ndata["feat"].dim() - 1)
+        norm = torch.reshape(norm, shp)
     # print(g.ndata["feat"].shape)
     # print(norm.shape)
     for hop in range(1, args.R + 1):
-        g.ndata["feat"] = g.ndata[f"feat_{hop-1}"] 
-        g.update_all(fn.copy_src(src="feat", out="msg"),
-                     fn.mean(msg="msg", out="feat"))
-        g.ndata[f"feat_{hop}"] = g.ndata["feat"] 
+        g.ndata["f"] = g.ndata[f"feat_{hop-1}"]
+        if args.use_norm:
+            g.ndata["f"] = g.ndata["f"] * norm
+            g.update_all(fn.copy_src(src="f", out="msg"),
+                         fn.sum(msg="msg", out="f"))
+        else:
+            g.update_all(fn.copy_src(src="f", out="msg"),
+                         fn.mean(msg="msg", out="f"))
+        g.ndata[f"feat_{hop}"] = g.ndata["f"]
+        if args.use_norm:
+            g.ndata[f"feat_{hop}"] = g.ndata[f"feat_{hop}"] * norm
     res = []
     for hop in range(args.R + 1):
         res.append(g.ndata.pop(f"feat_{hop}"))
@@ -202,12 +223,12 @@ def run(args, data, device):
     # Initialize model and optimizer for each run
     num_hops = args.R + 1
     model = AGDN(in_size, args.num_hidden, num_classes, num_hops,
-                 args.mlp_layer, args.num_heads, args.dropout, args.input_dropout)
+                 args.mlp_layer, args.num_heads, args.dropout, args.input_dropout, args.last_bias)
     model = model.to(device)
     print("# Params:", get_n_params(model))
 
     loss_fcn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr,
+    optimizer = torch.optim.RMSprop(model.parameters(), lr=args.lr,
                                  weight_decay=args.weight_decay)
 
     # Start training
@@ -259,25 +280,27 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="SIGN")
+    parser = argparse.ArgumentParser(description="AGDN")
     parser.add_argument("--num-epochs", type=int, default=1000)
+    parser.add_argument("--use-norm", action='store_true')
+    parser.add_argument("--last-bias", action='store_true')
     parser.add_argument("--num-hidden", type=int, default=512)
     parser.add_argument("--R", type=int, default=5,
                         help="number of hops")
-    parser.add_argument("--lr", type=float, default=0.001)
-    parser.add_argument("--dataset", type=str, default="ogbn-mag")
+    parser.add_argument("--lr", type=float, default=0.01)
+    parser.add_argument("--dataset", type=str, default="ogbn-products")
     parser.add_argument("--dropout", type=float, default=0.5,
                         help="dropout on activation")
     parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--weight-decay", type=float, default=0)
     parser.add_argument("--eval-every", type=int, default=10)
-    parser.add_argument("--batch-size", type=int, default=50000)
-    parser.add_argument("--eval-batch-size", type=int, default=100000,
+    parser.add_argument("--batch-size", type=int, default=20000)
+    parser.add_argument("--eval-batch-size", type=int, default=50000,
                         help="evaluation batch size")
     parser.add_argument("--mlp-layer", type=int, default=3,
                         help="number of feed-forward layers")
-    parser.add_argument("--num-heads", type=int, default=2)
-    parser.add_argument("--input-dropout", type=float, default=0,
+    parser.add_argument("--num-heads", type=int, default=1)
+    parser.add_argument("--input-dropout", type=float, default=0.1,
                         help="dropout on input features")
     parser.add_argument("--num-runs", type=int, default=10,
                         help="number of times to repeat the experiment")
