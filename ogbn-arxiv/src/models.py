@@ -1,6 +1,7 @@
 import dgl.nn.pytorch as dglnn
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from dgl import function as fn
 from dgl._ffi.base import DGLError
 from dgl.nn.pytorch.utils import Identity
@@ -113,35 +114,36 @@ class GATConv(nn.Module):
         num_heads=1,
         feat_drop=0.0,
         attn_drop=0.0,
+        edge_drop=0.0,
         negative_slope=0.2,
+        use_attn_dst=True,
         residual=False,
         activation=None,
         allow_zero_in_degree=False,
-        norm="none",
+        use_symmetric_norm=False,
     ):
         super(GATConv, self).__init__()
-        if norm not in ("none", "both"):
-            raise DGLError('Invalid norm value. Must be either "none", "both".' ' But got "{}".'.format(norm))
         self._num_heads = num_heads
         self._in_src_feats, self._in_dst_feats = expand_as_pair(in_feats)
         self._out_feats = out_feats
         self._allow_zero_in_degree = allow_zero_in_degree
-        self._norm = norm
+        self._use_symmetric_norm = use_symmetric_norm
         if isinstance(in_feats, tuple):
             self.fc_src = nn.Linear(self._in_src_feats, out_feats * num_heads, bias=False)
             self.fc_dst = nn.Linear(self._in_dst_feats, out_feats * num_heads, bias=False)
         else:
             self.fc = nn.Linear(self._in_src_feats, out_feats * num_heads, bias=False)
         self.attn_l = nn.Parameter(torch.FloatTensor(size=(1, num_heads, out_feats)))
-        self.attn_r = nn.Parameter(torch.FloatTensor(size=(1, num_heads, out_feats)))
+        if use_attn_dst:
+            self.attn_r = nn.Parameter(torch.FloatTensor(size=(1, num_heads, out_feats)))
+        else:
+            self.register_buffer("attn_r", None)
         self.feat_drop = nn.Dropout(feat_drop)
         self.attn_drop = nn.Dropout(attn_drop)
+        self.edge_drop = edge_drop
         self.leaky_relu = nn.LeakyReLU(negative_slope)
         if residual:
-            if self._in_dst_feats != out_feats:
-                self.res_fc = nn.Linear(self._in_dst_feats, num_heads * out_feats, bias=False)
-            else:
-                self.res_fc = Identity()
+            self.res_fc = nn.Linear(self._in_dst_feats, num_heads * out_feats, bias=False)
         else:
             self.register_buffer("res_fc", None)
         self.reset_parameters()
@@ -155,7 +157,8 @@ class GATConv(nn.Module):
             nn.init.xavier_normal_(self.fc_src.weight, gain=gain)
             nn.init.xavier_normal_(self.fc_dst.weight, gain=gain)
         nn.init.xavier_normal_(self.attn_l, gain=gain)
-        nn.init.xavier_normal_(self.attn_r, gain=gain)
+        if isinstance(self.attn_r, nn.Parameter):
+            nn.init.xavier_normal_(self.attn_r, gain=gain)
         if isinstance(self.res_fc, nn.Linear):
             nn.init.xavier_normal_(self.res_fc.weight, gain=gain)
 
@@ -177,13 +180,17 @@ class GATConv(nn.Module):
                 feat_src = self.fc_src(h_src).view(-1, self._num_heads, self._out_feats)
                 feat_dst = self.fc_dst(h_dst).view(-1, self._num_heads, self._out_feats)
             else:
-                h_src = h_dst = self.feat_drop(feat)
-                feat_src, feat_dst = h_src, h_dst
-                feat_src = feat_dst = self.fc(h_src).view(-1, self._num_heads, self._out_feats)
+                h_src = self.feat_drop(feat)
+                feat_src = h_src
+                feat_src = self.fc(h_src).view(-1, self._num_heads, self._out_feats)
                 if graph.is_block:
+                    h_dst = h_src[: graph.number_of_dst_nodes()]
                     feat_dst = feat_src[: graph.number_of_dst_nodes()]
+                else:
+                    h_dst = h_src
+                    feat_dst = feat_src
 
-            if self._norm == "both":
+            if self._use_symmetric_norm:
                 degs = graph.out_degrees().float().clamp(min=1)
                 norm = torch.pow(degs, -0.5)
                 shp = norm.shape + (1,) * (feat_src.dim() - 1)
@@ -201,27 +208,30 @@ class GATConv(nn.Module):
             # addition could be optimized with DGL's built-in function u_add_v,
             # which further speeds up computation and saves memory footprint.
             el = (feat_src * self.attn_l).sum(dim=-1).unsqueeze(-1)
-            er = (feat_dst * self.attn_r).sum(dim=-1).unsqueeze(-1)
-            
-            # el = 10 * (el - el.min(0, keepdim=True)[0]) / (el.max(0, keepdim=True)[0] - el.min(0, keepdim=True)[0])
-            # er = 10 * (er - er.min(0, keepdim=True)[0]) / (er.max(0, keepdim=True)[0] - er.min(0, keepdim=True)[0])
             graph.srcdata.update({"ft": feat_src, "el": el})
-            graph.dstdata.update({"er": er})
             # compute edge attention, el and er are a_l Wh_i and a_r Wh_j respectively.
-            graph.apply_edges(fn.u_add_v("el", "er", "e"))
+            if self.attn_r is not None:
+                er = (feat_dst * self.attn_r).sum(dim=-1).unsqueeze(-1)
+                graph.dstdata.update({"er": er})
+                graph.apply_edges(fn.u_add_v("el", "er", "e"))
+            else:
+                graph.apply_edges(fn.copy_u("el", "e"))
             e = self.leaky_relu(graph.edata.pop("e"))
-            # compute softmax
-            a_dst = edge_softmax(graph, e, norm_by='dst')
-            # a_src = edge_softmax(graph, e, norm_by='src')
-            # # print(a_dst.max(), a_src.max())
-            # a_dst = torch.pow(a_dst + 1e-20, 0.5)
-            # a_src = torch.pow(a_src + 1e-20, 0.5)
-            graph.edata["a"] = self.attn_drop(a_dst)
+
+            if self.training and self.edge_drop > 0:
+                perm = torch.randperm(graph.number_of_edges(), device=e.device)
+                bound = int(graph.number_of_edges() * self.edge_drop)
+                eids = perm[bound:]
+                graph.edata["a"] = torch.zeros_like(e)
+                graph.edata["a"][eids] = self.attn_drop(edge_softmax(graph, e[eids], eids=eids))
+            else:
+                graph.edata["a"] = self.attn_drop(edge_softmax(graph, e))
+
             # message passing
             graph.update_all(fn.u_mul_e("ft", "a", "m"), fn.sum("m", "ft"))
             rst = graph.dstdata["ft"]
 
-            if self._norm == "both":
+            if self._use_symmetric_norm:
                 degs = graph.in_degrees().float().clamp(min=1)
                 norm = torch.pow(degs, 0.5)
                 shp = norm.shape + (1,) * (feat_dst.dim() - 1)
@@ -232,15 +242,29 @@ class GATConv(nn.Module):
             if self.res_fc is not None:
                 resval = self.res_fc(h_dst).view(h_dst.shape[0], -1, self._out_feats)
                 rst = rst + resval
+
             # activation
             if self._activation is not None:
                 rst = self._activation(rst)
+
             return rst
 
 
 class GAT(nn.Module):
     def __init__(
-        self, in_feats, n_classes, n_hidden, n_layers, n_heads, activation, dropout=0.0, attn_drop=0.0, norm="none"
+        self,
+        in_feats,
+        n_classes,
+        n_hidden,
+        n_layers,
+        n_heads,
+        activation,
+        dropout=0.0,
+        input_drop=0.0,
+        attn_drop=0.0,
+        edge_drop=0.0,
+        use_attn_dst=True,
+        use_symmetric_norm=False,
     ):
         super().__init__()
         self.in_feats = in_feats
@@ -250,42 +274,49 @@ class GAT(nn.Module):
         self.num_heads = n_heads
 
         self.convs = nn.ModuleList()
-        self.linear = nn.ModuleList()
-        self.bns = nn.ModuleList()
-        self.biases = nn.ModuleList()
+        self.norms = nn.ModuleList()
 
         for i in range(n_layers):
             in_hidden = n_heads * n_hidden if i > 0 else in_feats
             out_hidden = n_hidden if i < n_layers - 1 else n_classes
-            # in_channels = n_heads if i > 0 else 1
+            num_heads = n_heads if i < n_layers - 1 else 1
             out_channels = n_heads
 
-            self.convs.append(GATConv(in_hidden, out_hidden, num_heads=n_heads, attn_drop=attn_drop, norm=norm))
+            self.convs.append(
+                GATConv(
+                    in_hidden,
+                    out_hidden,
+                    num_heads=num_heads,
+                    attn_drop=attn_drop,
+                    edge_drop=edge_drop,
+                    use_attn_dst=use_attn_dst,
+                    use_symmetric_norm=use_symmetric_norm,
+                    residual=True,
+                )
+            )
 
-            self.linear.append(nn.Linear(in_hidden, out_channels * out_hidden, bias=False))
             if i < n_layers - 1:
-                self.bns.append(nn.BatchNorm1d(out_channels * out_hidden))
+                self.norms.append(nn.BatchNorm1d(out_channels * out_hidden))
 
-        self.bias_last = Bias(n_classes)
+        self.bias_last = ElementWiseLinear(n_classes, weight=False, bias=True, inplace=True)
 
-        self.dropout0 = nn.Dropout(min(0.1, dropout))
+        self.input_drop = nn.Dropout(input_drop)
         self.dropout = nn.Dropout(dropout)
         self.activation = activation
 
     def forward(self, graph, feat):
         h = feat
-        h = self.dropout0(h)
+        h = self.input_drop(h)
 
         for i in range(self.n_layers):
             conv = self.convs[i](graph, h)
-            linear = self.linear[i](h).view(conv.shape)
 
-            h = conv + linear
+            h = conv
 
             if i < self.n_layers - 1:
                 h = h.flatten(1)
-                h = self.bns[i](h)
-                h = self.activation(h)
+                h = self.norms[i](h)
+                h = self.activation(h, inplace=True)
                 h = self.dropout(h)
 
         h = h.mean(1)
@@ -469,7 +500,7 @@ class GATHAConv(nn.Module):
         residual=False,
         activation=None,
         allow_zero_in_degree=False,
-        norm='both'
+        norm='sym'
     ):
         super(GATHAConv, self).__init__()
         self._num_heads = num_heads
@@ -479,15 +510,17 @@ class GATHAConv(nn.Module):
         self._K = K
         self._norm = norm
 
-        self.sigma = nn.Parameter(torch.FloatTensor(size=(1,)))
         self.attn_l = nn.Parameter(torch.FloatTensor(size=(1, num_heads, out_feats)))
         if use_attn_dst:
             self.attn_r = nn.Parameter(torch.FloatTensor(size=(1, num_heads, out_feats)))
         else:
             self.register_buffer("attn_r", None)
         self.fc = nn.Linear(self._in_src_feats, out_feats * num_heads, bias=False)
+        self.position_emb = nn.Parameter(torch.FloatTensor(size=(K+1, num_heads, out_feats)))
         self.hop_attn_l = nn.Parameter(torch.FloatTensor(size=(1, num_heads, out_feats)))
         self.hop_attn_r = nn.Parameter(torch.FloatTensor(size=(1, num_heads, out_feats)))
+        self.hop_attn_bias_l = nn.Parameter(torch.FloatTensor(size=(1, num_heads, 1)))
+        self.hop_attn_bias_r = nn.Parameter(torch.FloatTensor(size=(1, num_heads, 1)))
         self.feat_drop = nn.Dropout(feat_drop)
         self.attn_drop = nn.Dropout(attn_drop)
         self.edge_drop = edge_drop
@@ -509,11 +542,13 @@ class GATHAConv(nn.Module):
         nn.init.xavier_normal_(self.attn_l, gain=gain)
         if isinstance(self.attn_r, nn.Parameter):
             nn.init.xavier_normal_(self.attn_r, gain=gain)
+        nn.init.xavier_normal_(self.position_emb)
         nn.init.xavier_normal_(self.hop_attn_l, gain=gain)
         nn.init.xavier_normal_(self.hop_attn_r, gain=gain)
+        nn.init.xavier_normal_(self.hop_attn_bias_l, gain=gain)
+        nn.init.xavier_normal_(self.hop_attn_bias_r, gain=gain)
         if isinstance(self.res_fc, nn.Linear):
             nn.init.xavier_normal_(self.res_fc.weight, gain=gain)
-        nn.init.uniform(self.sigma)
 
     def set_allow_zero_in_degree(self, set_value):
         self._allow_zero_in_degree = set_value
@@ -523,19 +558,38 @@ class GATHAConv(nn.Module):
             if not self._allow_zero_in_degree:
                 if (graph.in_degrees() == 0).any():
                     assert False
-            feat = self.feat_drop(feat)
-            h = self.fc(feat).view(-1, self._num_heads, self._out_feats)
-            hstack = [h]
-
-            feat_src = h
+            if isinstance(feat, tuple):
+                h_src = self.feat_drop(feat[0])
+                h_dst = self.feat_drop(feat[1])
+                if not hasattr(self, "fc_src"):
+                    self.fc_src, self.fc_dst = self.fc, self.fc
+                feat_src, feat_dst = h_src, h_dst
+                feat_src = self.fc_src(h_src).view(-1, self._num_heads, self._out_feats)
+                feat_dst = self.fc_dst(h_dst).view(-1, self._num_heads, self._out_feats)
+            else:
+                h_src = self.feat_drop(feat)
+                feat_src = h_src
+                feat_src = self.fc(h_src).view(-1, self._num_heads, self._out_feats)
+                if graph.is_block:
+                    h_dst = h_src[: graph.number_of_dst_nodes()]
+                    feat_dst = feat_src[: graph.number_of_dst_nodes()]
+                else:
+                    h_dst = h_src
+                    feat_dst = feat_src
             
+            if self.training and self.edge_drop > 0:
+                perm = torch.randperm(graph.number_of_edges(), device=graph.device)
+                bound = int(graph.number_of_edges() * self.edge_drop)
+                eids = perm[bound:]
+            else:
+                eids = torch.arange(graph.number_of_edges(), device=graph.device)
+
             el = (feat_src * self.attn_l).sum(-1).unsqueeze(-1)
-            # er = (feat_src * self.attn_r).sum(-1).unsqueeze(-1)
             graph.srcdata.update({"ft": feat_src, "el": el})
             # graph.dstdata.update({"er": er})
             # compute edge attention, el and er are a_l Wh_i and a_r Wh_j respectively.
             if self.attn_r is not None:
-                er = (feat_src * self.attn_r).sum(dim=-1).unsqueeze(-1)
+                er = (feat_dst * self.attn_r).sum(dim=-1).unsqueeze(-1)
                 graph.dstdata.update({"er": er})
                 graph.apply_edges(fn.u_add_v("el", "er", "e"))
             else:
@@ -543,75 +597,40 @@ class GATHAConv(nn.Module):
             e = self.leaky_relu(graph.edata.pop("e"))
             
             # compute softmax
-            if self.training and self.edge_drop > 0:
-                perm = torch.randperm(graph.number_of_edges(), device=e.device)
-                bound = int(graph.number_of_edges() * self.edge_drop)
-                eids = perm[bound:]
-                graph.edata["a"] = torch.zeros_like(e)
-                if self._norm in ['both', 'gat']:
-                    a_src = edge_softmax(graph, e[eids], eids=eids, norm_by='src').clamp(min=1e-10)
-                    a_dst = edge_softmax(graph, e[eids], eids=eids, norm_by='dst').clamp(min=1e-10)
-                    
-                    # # print(a_dst.max(), a_src.max())
-                    a_dst = torch.pow(a_dst, torch.sigmoid(self.sigma))
-                    a_src = torch.pow(a_src, 1 - torch.sigmoid(self.sigma))
-                    graph.edata["a"][eids] = self.attn_drop(a_dst * a_src)
-                else:
-                    graph.edata["a"][eids] = self.attn_drop(edge_softmax(graph, e[eids], eids=eids))
-            else:
-                if self._norm in ['both', 'gat']:
-                    a_src = edge_softmax(graph, e, norm_by='src').clamp(min=1e-10)
-                    a_dst = edge_softmax(graph, e, norm_by='dst').clamp(min=1e-10)
-                    
-                    # # print(a_dst.max(), a_src.max())
-                    a_dst = torch.pow(a_dst, torch.sigmoid(self.sigma))
-                    a_src = torch.pow(a_src, 1 - torch.sigmoid(self.sigma))
-                    graph.edata["a"] = self.attn_drop(a_dst * a_src)
-                
-                else:
-                    graph.edata["a"] = self.attn_drop(edge_softmax(graph, e, norm_by='dst'))
+            
+            graph.edata["a"] = torch.zeros_like(e)
+            graph.edata["a"][eids] = self.attn_drop(edge_softmax(graph, e[eids], eids=eids))
+            shp = graph.edata["gcn_norm"].shape + (1,) * (feat_dst.dim() - 1)
+            if self._norm == "sym":
+                graph.edata["a"][eids] = graph.edata["a"][eids] * torch.reshape(graph.edata["gcn_norm_adjust"], shp)[eids]
+            if self._norm == "avg":
+                graph.edata["a"][eids] = (graph.edata["a"][eids] + torch.reshape(graph.edata["gcn_norm"],shp)[eids])/2
 
-            for k in range(self._K):
-                
-                feat_src = hstack[-1]
-                if self._norm in ["both", "gcn"]:
-                    degs = graph.out_degrees().float().clamp(min=1)
-                    norm = torch.pow(degs, -0.5)
-                    shp = norm.shape + (1,) * (feat_src.dim() - 1)
-                    norm = torch.reshape(norm, shp)
-                    feat_src = feat_src * norm
-                graph.srcdata.update({"ft": feat_src})
+            
+            hstack = [graph.dstdata["ft"]]
+
+            for _ in range(self._K):
                 # message passing
                 graph.update_all(fn.u_mul_e("ft", "a", "m"), fn.sum("m", "ft"))
-                feat_src = graph.dstdata["ft"]
-                if self._norm in ["both", "gcn"]:
-                    degs = graph.in_degrees().float().clamp(min=1)
-                    norm = torch.pow(degs, 0.5)
-                    shp = norm.shape + (1,) * (feat_src.dim() - 1)
-                    norm = torch.reshape(norm, shp)
-                    feat_src = feat_src * norm
 
-                hstack.append(feat_src)
+                hstack.append(graph.dstdata["ft"])
 
-            feat_src = h
-            fstack_dst = hstack
-            feat_src = feat_src.view(-1, self._num_heads, self._out_feats)
-            fstack_dst = [feat_dst.view(-1, self._num_heads, self._out_feats) for feat_dst in fstack_dst]
-            a_l = (feat_src * self.hop_attn_l).sum(dim=-1).unsqueeze(-1)
-            astack_r = [(feat_dst * self.hop_attn_r).sum(dim=-1).unsqueeze(-1) for feat_dst in fstack_dst]
-            astack = torch.cat([(a_l + a_r).unsqueeze(-1) for a_r in astack_r], dim=-1)
-            a = self.leaky_relu(astack)
+            hstack = [h + self.position_emb[[k], :, :] for k, h in enumerate(hstack)]
+            a_l = (hstack[0] * self.hop_attn_l).sum(dim=-1).unsqueeze(-1)
+            astack_r = [(feat_dst * self.hop_attn_r).sum(dim=-1).unsqueeze(-1) for feat_dst in hstack]
+            a = torch.cat([(a_r + a_l) for a_r in astack_r], dim=-1)
+            # a = torch.sigmoid(a)
+            a = self.leaky_relu(a)
             a = torch.nn.functional.softmax(a, dim=-1)
-            # compute softmax
             a = self.attn_drop(a)
+            # a = F.dropout(a, p=0.5, training=self.training)
             rst = 0
             for i in range(a.shape[-1]):
-                rst += fstack_dst[i] * a[:, :, :, i]
-            # rst = (torch.cat([feat_dst.unsqueeze(-1) for feat_dst in fstack_dst], dim=-1) * a).sum(-1)
+                rst += hstack[i] * a[:, :, [i]]
 
             # residual
             if self.res_fc is not None:
-                resval = self.res_fc(feat).view(h.shape[0], -1, self._out_feats)
+                resval = self.res_fc(feat).view(h_dst.shape[0], -1, self._out_feats)
                 rst = rst + resval
             # activation
             if self._activation is not None:

@@ -14,19 +14,13 @@ To reproduce results of GCN-HA:
 
 `python src/gcn-ha.py --seed 0 --lr 0.002 --n-layers 3 --n-hidden 256 --K 3 --n-heads 1 --dropout 0.5 --input_drop 0.1 --attn_drop 0.05 --epochs 2000 --n-runs 10` (without labels)
 
-To reproduce results of GAT-HA:
+To reproduce results of GAT-HA, execute the `scripts`:
+```
+CUDA_VISIBLE_DEVICES=0 bash scripts/{model}/{script}
+```
 
-`python src/gat-ha.py --seed 0 --n-label-iters 0 --lr 0.002 --n-layers 3 --n-hidden 256 --K 3 --n-heads 1 --dropout 0.5 --input_drop 0.1 --edge_drop 0.0 --attn_drop 0.05 --norm gcn --no-attn-dst --epochs 2000 --n-runs 10 --use-labels` (1 head with labels)
+In GAT-HA, the argument "norm" means the way of extra normalization performed on "already" normalized GAT transition matrix. "norm==sym" follows the form from Espylapiza's implementation. "norm==avg" uses a mean of GAT transition matrix and GCN transition matrix.
 
-`python src/gat-ha.py --seed 0 --n-label-iters 0 --lr 0.002 --n-layers 3 --n-hidden 256 --K 3 --n-heads 1 --dropout 0.5 --input_drop 0.1 --edge_drop 0.0 --attn_drop 0.05 --norm gcn --no-attn-dst --epochs 2000 --n-runs 10` (1 head without labels)
-
-`python src/gat-ha.py --seed 0 --n-label-iters 0 --lr 0.002 --n-layers 3 --n-hidden 256 --K 3 --n-heads 3 --dropout 0.75 --input_drop 0.25 --edge_drop 0.0 --attn_drop 0.05 --norm gcn --no-attn-dst --epochs 2000 --n-runs 10 --use-labels` (3 heads with labels)
-
-`python src/gat-ha.py --seed 0 --n-label-iters 0 --lr 0.002 --n-layers 3 --n-hidden 256 --K 3 --n-heads 3 --dropout 0.75 --input_drop 0.25 --edge_drop 0.0 --attn_drop 0.05 --norm gcn --no-attn-dst --epochs 2000 --n-runs 10` (3 heads without labels)
-
-In GAT-HA, the argument "norm" means the way of extra normalization performed on "already" normalized GAT transition matrix. "norm==gcn" follows the operation from Espylapiza's implementation. "norm==gat" uses a geometric mean of attention scores normalized by "src" and by "dst". These two settings can be mixed, with "norm==both".
-
-SGAT-HA is still in development and can be ignored for now.
 
 Results without using labels:
 |  model   | test_acc  |
