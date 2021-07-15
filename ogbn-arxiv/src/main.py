@@ -16,7 +16,8 @@ from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
 
 from gen_model import gen_model
 from utils import (add_labels, adjust_learning_rate, compute_acc, compute_norm,
-                   loge_cross_entropy, loss_kd_only, plot, save_checkpoint, seed)
+                   cross_entropy, loge_cross_entropy, loss_kd_only, plot,
+                   save_checkpoint, seed)
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -24,7 +25,7 @@ device = None
 in_feats, n_classes = None, None
 
 
-def train(args, model, graph, labels, train_idx, val_idx, test_idx, optimizer, teacher_output, evaluator, epoch=1):
+def train(args, model, graph, labels, train_idx, val_idx, test_idx, optimizer, teacher_output, loss_fcn, evaluator, epoch=1):
     model.train()
 
     feat = graph.ndata["feat"]
@@ -38,8 +39,8 @@ def train(args, model, graph, labels, train_idx, val_idx, test_idx, optimizer, t
         feat = add_labels(feat, labels, train_labels_idx, n_classes, device)
     else:
         mask = torch.rand(train_idx.shape) < args.mask_rate
-
-        train_pred_idx = train_idx[mask]
+        # We change mask to ~mask to match previous definition
+        train_pred_idx = train_idx[~mask]
 
     optimizer.zero_grad()
     pred = model(graph, feat)
@@ -53,7 +54,8 @@ def train(args, model, graph, labels, train_idx, val_idx, test_idx, optimizer, t
             # confident_unlabel_idx = unlabel_idx[unlabel_probs.max(dim=-1)[0] > 0.7]
             feat[unlabel_idx, -n_classes:] = F.softmax(pred[unlabel_idx], dim=-1)
             pred = model(graph, feat)
-    loss = loge_cross_entropy(pred[train_pred_idx], labels[train_pred_idx])
+    
+    loss = loss_fcn(pred[train_pred_idx], labels[train_pred_idx])
     if args.mode == "student":
         loss_kd = loss_kd_only(pred, teacher_output, args.temp)
         loss = loss*(1-args.alpha) + loss_kd*args.alpha
@@ -64,7 +66,7 @@ def train(args, model, graph, labels, train_idx, val_idx, test_idx, optimizer, t
 
 
 @torch.no_grad()
-def evaluate(args, model, graph, labels, train_idx, val_idx, test_idx, use_labels, evaluator):
+def evaluate(args, model, graph, labels, train_idx, val_idx, test_idx, use_labels, loss_fcn, evaluator):
     model.eval()
 
     feat = graph.ndata["feat"]
@@ -78,9 +80,9 @@ def evaluate(args, model, graph, labels, train_idx, val_idx, test_idx, use_label
         for _ in range(args.n_label_iters):
             feat[unlabel_idx, -n_classes:] = F.softmax(pred[unlabel_idx], dim=-1)
             pred = model(graph, feat)
-    train_loss = loge_cross_entropy(pred[train_idx], labels[train_idx])
-    val_loss = loge_cross_entropy(pred[val_idx], labels[val_idx])
-    test_loss = loge_cross_entropy(pred[test_idx], labels[test_idx])
+    train_loss = loss_fcn(pred[train_idx], labels[train_idx])
+    val_loss = loss_fcn(pred[val_idx], labels[val_idx])
+    test_loss = loss_fcn(pred[test_idx], labels[test_idx])
 
     return (
         compute_acc(pred[train_idx], labels[train_idx], evaluator),
@@ -98,6 +100,10 @@ def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running)
     model = gen_model(in_feats, n_classes, args)
     model = model.to(device)
 
+    if not args.standard_loss:
+        loss_fcn = loge_cross_entropy
+    else:
+        loss_fcn = cross_entropy
     optimizer = optim.RMSprop(model.parameters(), lr=args.lr, weight_decay=args.wd)
 
     # training loop
@@ -132,10 +138,10 @@ def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running)
         if args.adjust_lr:
             adjust_learning_rate(optimizer, args.lr, epoch)
 
-        acc, loss = train(args, model, graph, labels, train_idx, val_idx, test_idx, optimizer, teacher_output, evaluator, epoch=epoch)
+        acc, loss = train(args, model, graph, labels, train_idx, val_idx, test_idx, optimizer, teacher_output, loss_fcn, evaluator, epoch=epoch)
 
         train_acc, val_acc, test_acc, train_loss, val_loss, test_loss, pred = evaluate(
-            args, model, graph, labels, train_idx, val_idx, test_idx, args.use_labels, evaluator
+            args, model, graph, labels, train_idx, val_idx, test_idx, args.use_labels, loss_fcn, evaluator
         )
 
         toc = time.time()
@@ -221,6 +227,7 @@ def main():
     argparser.add_argument("--output-path", type=str, default="../output/")
     argparser.add_argument("--save-pred", action="store_true", help="save final predictions")
     argparser.add_argument("--adjust-lr", action="store_true", help="adjust learning rate in first 50 iterations")
+    argparser.add_argument("--standard-loss", action="store_true")
     args = argparser.parse_args()
     print(f"args: {args}")
     assert args.mode in ["teacher", "student", "test"]

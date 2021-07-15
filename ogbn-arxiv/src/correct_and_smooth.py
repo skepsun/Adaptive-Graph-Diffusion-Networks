@@ -94,11 +94,11 @@ def run(args, graph, labels, pred, train_idx, val_idx, test_idx, evaluator):
     # dy = torch.zeros(graph.number_of_nodes(), n_classes, device=device)
     # dy[train_idx] = F.one_hot(labels[train_idx], n_classes).float().squeeze(1) - pred[train_idx]
 
-    _train_acc, val_acc, test_acc = evaluate(labels, y, train_idx, val_idx, test_idx, evaluator_wrapper)
+    _train_acc, origin_val_acc, origin_test_acc = evaluate(labels, y, train_idx, val_idx, test_idx, evaluator_wrapper)
 
     # print("train acc:", _train_acc)
-    print("original val acc:", val_acc)
-    print("original test acc:", test_acc)
+    print("original val acc:", origin_val_acc)
+    print("original test acc:", origin_test_acc)
 
     # NOTE: Only "smooth" is performed here.
     # smoothed_dy = general_outcome_correlation(
@@ -119,7 +119,7 @@ def run(args, graph, labels, pred, train_idx, val_idx, test_idx, evaluator):
     print("val acc:", val_acc)
     print("test acc:", test_acc)
 
-    return val_acc, test_acc
+    return origin_val_acc, origin_test_acc, val_acc, test_acc
 
 
 def main():
@@ -148,7 +148,7 @@ def main():
     )
 
     # run
-    val_accs, test_accs = [], []
+    origin_val_accs, origin_test_accs, val_accs, test_accs = [], [], [], []
 
     for pred_file in glob.iglob(args.pred_files):
         print("load:", pred_file)
@@ -156,7 +156,9 @@ def main():
         if pred.max() > 1 or pred.min() < 0:
             print("not standard probability")
             pred = pred.softmax(dim=-1)
-        val_acc, test_acc = run(args, graph, labels, pred, train_idx, val_idx, test_idx, evaluator)
+        origin_val_acc, origin_test_acc, val_acc, test_acc = run(args, graph, labels, pred, train_idx, val_idx, test_idx, evaluator)
+        origin_val_accs.append(origin_val_acc)
+        origin_test_accs.append(origin_test_acc)
         val_accs.append(val_acc)
         test_accs.append(test_acc)
 
@@ -164,6 +166,8 @@ def main():
     print(f"Runned {len(val_accs)} times")
     print("Val Accs:", val_accs)
     print("Test Accs:", test_accs)
+    print(f"Average original val accuracy: {np.mean(origin_val_accs)} ± {np.std(origin_val_accs)}")
+    print(f"Average original test accuracy: {np.mean(origin_test_accs)} ± {np.std(origin_test_accs)}")
     print(f"Average val accuracy: {np.mean(val_accs)} ± {np.std(val_accs)}")
     print(f"Average test accuracy: {np.mean(test_accs)} ± {np.std(test_accs)}")
 

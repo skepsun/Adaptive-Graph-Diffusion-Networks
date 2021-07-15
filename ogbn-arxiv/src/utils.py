@@ -25,6 +25,9 @@ def save_checkpoint(pred, n_running, checkpoint_path):
     print('Saving prediction.......')
     torch.save(pred.cpu(),fname)
 
+def cross_entropy(x, labels):
+    return F.cross_entropy(x, labels[:, 0], reduction="mean")
+
 def loge_cross_entropy(x, labels):
     y = F.cross_entropy(x, labels[:, 0], reduction="none")
     y = torch.log(epsilon + y) - math.log(epsilon)
