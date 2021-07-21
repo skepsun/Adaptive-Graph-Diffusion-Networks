@@ -11,8 +11,8 @@ python -u ../../src/main.py \
     --K 3 \
     --n-heads 3 \
     --dropout 0.75 \
-    --input_drop 0.25 \
-    --edge_drop 0.3\
+    --input_drop 0.1 \
+    --edge_drop 0.1 \
     --attn_drop 0. \
     --norm none \
     --n-epochs 2000 \
