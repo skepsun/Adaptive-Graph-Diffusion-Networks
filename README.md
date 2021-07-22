@@ -7,7 +7,12 @@ The framework of training and evaluating is adapted from [DGL examples](https://
 requirements: `torch, ogb, dgl, torch_geometric`
 
 ## methods
-We use a multi-hop AGDN layer to replace GAT layer, which incorporates multi-hop information via adaptive hop-wise attention mechanism. We further add position embedding to enhance hop information. We explicitly use these important tricks: [BoT](https://github.com/Espylapiza/Bag-of-Tricks-for-Node-Classification-with-Graph-Neural-Networks), [self-KD](https://github.com/ShunliRen/dgl/tree/master/examples/pytorch/ogb/ogbn-arxiv) and [C&S](https://github.com/Chillee/CorrectAndSmooth). AGDN is previously named as GAT-HA.
+We use a multi-hop AGDN layer to replace GAT layer, which incorporates multi-hop information via adaptive hop-wise attention mechanism. We further add a learnable position embedding to enhance hop information. We explicitly use these important tricks: [BoT](https://github.com/Espylapiza/Bag-of-Tricks-for-Node-Classification-with-Graph-Neural-Networks), [self-KD](https://github.com/ShunliRen/dgl/tree/master/examples/pytorch/ogb/ogbn-arxiv) and [C&S](https://github.com/Chillee/CorrectAndSmooth). AGDN is previously named as GAT-HA. Note that BoT used in this repository includes norm.adj., loge loss, label input and label reuse. C&S used in this repository only includes label smoothing via propagations. 
+
+The additional position embedding is defined by:
+```
+nn.Parameter(torch.FloatTensor(size=(K+1, num_heads, out_feats)))
+```
 
 ## ogbn-arxiv
 
