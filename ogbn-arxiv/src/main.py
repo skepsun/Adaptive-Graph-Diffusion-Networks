@@ -126,7 +126,7 @@ def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running)
     graph.dstdata.update({"dst_norm": deg_sqrt})
     graph.apply_edges(fn.u_mul_v("src_norm", "dst_norm", "gcn_norm_adjust"))
 
-    checkpoint_path = os.path.join(args.checkpoint_path, args.model)
+    checkpoint_path = args.checkpoint_path
     if args.mode == "student":
         teacher_output = torch.load(os.path.join(checkpoint_path, f'best_pred_run{n_running}.pt')).cpu().cuda()
     else:

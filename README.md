@@ -20,17 +20,17 @@ CUDA_VISIBLE_DEVICES=0 python src/main.py --seed 0 --n-label-iters 0 --standard-
 
 Step2. To reproduce the results of `AGDN+BoT`:
 ```
-CUDA_VISIBLE_DEVICES=0 python src/main.py --seed 0 --n-label-iters 1 --lr 0.002 --model gat-ha --mode teacher --n-layers 3 --n-hidden 256 --K 3 --n-heads 3 --dropout 0.75 --input_drop 0.25 --edge_drop 0.3 --attn_drop 0. --no-attn-dst --norm sym --n-epochs 2000 --n-runs 10 --use-labels --checkpoint-path ../checkpoint/
+CUDA_VISIBLE_DEVICES=0 python src/main.py --seed 0 --n-label-iters 1 --lr 0.002 --model gat-ha --mode teacher --n-layers 3 --n-hidden 256 --K 3 --n-heads 3 --dropout 0.75 --input_drop 0.25 --edge_drop 0.3 --attn_drop 0. --no-attn-dst --norm sym --n-epochs 2000 --n-runs 10 --use-labels --checkpoint-path './checkpoint/'
 ```
 
 Step3. To reproduce the results of `AGDN+BoT+C&S` based on the results from Step 2:
 ```
-CUDA_VISIBLE_DEVICES=0 python src/correct_and_smooth.py --use-norm --pred-files './checkpoint1/gat-ha/*.pt' --alpha 0.73 --n-prop 8
+CUDA_VISIBLE_DEVICES=0 python src/correct_and_smooth.py --use-norm --pred-files './checkpoint/*.pt' --alpha 0.73 --n-prop 8
 ```
 
 Step4. To reproduce the results of `AGDN+BoT+self-KD` based on the results from Step 2:
 ```
-CUDA_VISIBLE_DEVICES=0 python src/main.py --seed 0 --alpha 0.9 --temp 0.7 --n-label-iters 1 --lr 0.002 --model gat-ha --mode student --n-layers 3 --n-hidden 256 --K 3 --n-heads 3 --dropout 0.75 --input_drop 0.25 --edge_drop 0.3 --attn_drop 0. --no-attn-dst --norm sym --n-epochs 2000 --n-runs 10 --use-labels --checkpoint-path ../checkpoint/ --save-pred --pred-path ../output/
+CUDA_VISIBLE_DEVICES=0 python src/main.py --seed 0 --alpha 0.9 --temp 0.7 --n-label-iters 1 --lr 0.002 --model gat-ha --mode student --n-layers 3 --n-hidden 256 --K 3 --n-heads 3 --dropout 0.75 --input_drop 0.25 --edge_drop 0.3 --attn_drop 0. --no-attn-dst --norm sym --n-epochs 2000 --n-runs 10 --use-labels --checkpoint-path './checkpoint/' --save-pred --pred-path './output/'
 ```
 
 Step5. To reproduce the results of `AGDN+BoT+self-KD+C&S` based on the results from Step 4:
