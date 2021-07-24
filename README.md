@@ -25,7 +25,7 @@ Step0. `cd ogbn-arxiv`.
 
 Step1. To reproduce the results of `AGDN` (trained with full training set in each epoch, without any other tricks except residual linears and drop edge):
 ```
-CUDA_VISIBLE_DEVICES=0 python src/main.py --seed 0 --n-label-iters 0 --standard-loss --lr 0.002 --model gat-ha --mode test --n-layers 3 --n-hidden 256 --K 3 --n-heads 3 --dropout 0.75 --input_drop 0.1 --edge_drop 0.1 --attn_drop 0. --norm none --n-epochs 2000 --n-runs 10
+CUDA_VISIBLE_DEVICES=0 python src/main.py --seed 0 --n-label-iters 0 --standard-loss --lr 0.002 --mask-rate 0.0 --model gat-ha --mode test --n-layers 3 --n-hidden 256 --K 3 --n-heads 3 --dropout 0.75 --input_drop 0.1 --edge_drop 0.1 --attn_drop 0. --norm none --n-epochs 2000 --n-runs 10
 ```
 
 Step2. To reproduce the results of `AGDN+BoT`:
