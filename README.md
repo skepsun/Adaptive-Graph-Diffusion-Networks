@@ -12,57 +12,40 @@ Feel free to utilize and modify this repository, but remember to briefly introdu
  
 ## Method
 We propose Adaptive Graph Diffusion Networks (AGDNs) to extend receptive fields of common Message Passing Nueral Networks (MPNNs), without extra layers (feature transformations) or decoupling model architecture (resulting graph convolution restricted in the same space). Following the historical path of GNNs, that spectral GNNs have elegant analyzability but usually have poor scalability and performance, we generalize the graph diffusion to be more spatial. In detail, for an MPNN model (usually GAT in this repository), we replace the graph convolution operator in each layer with a generalized graph diffusion operator. The generalized graph diffusion operator is defined as follows:
-$
-\tilde{\boldsymbol H}^{(l,0)} = \boldsymbol H^{(l-1)}\boldsymbol W^{(l)},
-$
 
-$
-\tilde{\boldsymbol H}^{(l,k)} = \overline{\boldsymbol A}\tilde{\boldsymbol H}^{(l,k-1)},
-$
+$\tilde{\boldsymbol H}^{(l,0)} = \boldsymbol H^{(l-1)}\boldsymbol W^{(l)},$
 
-$
-{\boldsymbol H}^{(l)}=\sum^{K}_{k=0}{\boldsymbol \Theta}^{(k)}\otimes\tilde{\boldsymbol H}^{(l,k)}+\boldsymbol{H}^{(l-1)}\boldsymbol{W}^{(l),r}
-$
+$\tilde{\boldsymbol H}^{(l,k)} = \overline{\boldsymbol A}\tilde{\boldsymbol H}^{(l,k-1)},$
+
+${\boldsymbol H}^{(l)}=\sum^{K}_{k=0}{\boldsymbol \Theta}^{(k)}\otimes\tilde{\boldsymbol H}^{(l,k)}+\boldsymbol{H}^{(l-1)}\boldsymbol{W}^{(l),r},$
 
 where $\otimes$ denotes the element-wise matrix multiplication. We describe the above proceedures in a node viewpoint:
-$
-\tilde{\boldsymbol h}^{(l,0)}_i=\boldsymbol h^{(l-1)}_i\boldsymbol W^{(l)},
-$
 
-$
-\tilde{\boldsymbol h}^{(l,k)}_i=\sum_{j\in \mathcal{N}_i}\overline{A}_{ij}\tilde{\boldsymbol h}^{(l,k-1)}_j,
-$
+$\tilde{\boldsymbol h}^{(l,0)}_i=\boldsymbol h^{(l-1)}_i\boldsymbol W^{(l)},$
 
-$
-h^{(l)}_{ic}=\sum_{k=0}^{K}\theta_{ikc}\tilde{h}^{(l,k)}_{ic}+\sum_{c'=1}^{d^{(l-1)}}h^{(l-1)}_{ic'}W^{(l),r}_{c'c},
-$
+$\tilde{\boldsymbol h}^{(l,k)}_i=\sum_{j\in \mathcal{N}_i}\overline{A}_{ij}\tilde{\boldsymbol h}^{(l,k-1)}_j,$
+
+$h^{(l)}_{ic}=\sum_{k=0}^{K}\theta_{ikc}\tilde{h}^{(l,k)}_{ic}+\sum_{c'=1}^{d^{(l-1)}}h^{(l-1)}_{ic'}W^{(l),r}_{c'c},$
 
 To obtain the possibly node-wise or channel-wise weighting coefficients $\theta_{ikc}$, we propose two mechanisms: Hop-wise Attention (HA) and Hop-wise Convolution (HC).
 
 Hop-wise Attention (HA) is a GAT-like attention mechanism and utilizes a $2\times d$ query vector $\boldsymbol a_{hw}$ to induce node-wise weighting coefficients $\boldsymbol \Theta^{HA} \in \mathbb R^{N\times (K+1)}$:
-$
-\omega_{ik} = \left[\tilde{\boldsymbol h}^{(l,0)}_{i}\left\lvert\right\rvert\tilde{\boldsymbol h}^{(l,k)}_{i}\right]\cdot \boldsymbol a_{hw},
-$
 
-$
-{\theta}_{ik}^{HA}=\frac {{\rm exp}\left({\sigma}\left(\omega_{ik}\right)\right)}{\sum _{k=0}^{K} {{\rm exp}\left({\sigma}\left(\omega_{ik}\right)\right)}},
-$
+$\omega_{ik} = \left[\tilde{\boldsymbol h}^{(l,0)}_{i}\left\lvert\right\rvert\tilde{\boldsymbol h}^{(l,k)}_{i}\right]\cdot \boldsymbol a_{hw},$
 
-$
-\theta^{HA}_{ikc}=\theta^{HA}_{ik},\forall i,k,c
-$
+${\theta}_{ik}^{HA}=\frac {{\rm exp}\left({\sigma}\left(\omega_{ik}\right)\right)}{\sum _{k=0}^{K} {{\rm exp}\left({\sigma}\left(\omega_{ik}\right)\right)}},$
+
+$\theta^{HA}_{ikc}=\theta^{HA}_{ik},\forall i,k,c$
 
 Hop-wise Convolution (HC) directly defines a learnable channel-wise convolution kernel $\boldsymbol \Theta^{HC}\in \mathbb R^{(K+1)\times d}$:
-$
-\theta^{HC}_{ikc}=\theta^{HC}_{kc},\forall i,k,c
-$
+
+$\theta^{HC}_{ikc}=\theta^{HC}_{kc},\forall i,k,c$
 
 HA and HC are just examples, we expect more mechanisms from the community.
 
 In addition, we utilize hop-wise Positional Embedding (PE) on some datasets to enhance hop-wise position information (PE may increase 1~2 Gb memory cost):
-$
-\tilde{\boldsymbol h}^{(l,k)} = \tilde{\boldsymbol h}^{(l,k)} + \boldsymbol p^{(l,k)}
-$
+
+$\tilde{\boldsymbol h}^{(l,k)} = \tilde{\boldsymbol h}^{(l,k)} + \boldsymbol p^{(l,k)}$
 
 ## Performance
 ogbn-arxiv:
