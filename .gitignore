@@ -2,7 +2,9 @@
 /ogbn-arxiv/dataset/
 /ogbn-products/dataset/
 /ogbn-products/src/__pycache__
-__pycache__/*
+/ogbn-proteins/src/__pycache__
+/ogbl_no_sampling/src/__pycache__
+/ogbl_sampling_methods/src/__pycache__
 dataset/*
 nohup.*
 *.out
