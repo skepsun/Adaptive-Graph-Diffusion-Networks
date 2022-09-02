@@ -11,6 +11,9 @@ We offer associated shell scripts for reproducing our results. Remember to modif
 Feel free to utilize and modify this repository, but remember to briefly introduce and cite this work:D
  
 ## Method
+
+(There exist some *rendering mistakes* when using \sum_{xxx}^{xxx} in latex scripts)
+
 We propose Adaptive Graph Diffusion Networks (AGDNs) to extend receptive fields of common Message Passing Nueral Networks (MPNNs), without extra layers (feature transformations) or decoupling model architecture (resulting graph convolution restricted in the same space). Following the historical path of GNNs, that spectral GNNs have elegant analyzability but usually have poor scalability and performance, we generalize the graph diffusion to be more spatial. In detail, for an MPNN model (usually GAT in this repository), we replace the graph convolution operator in each layer with a generalized graph diffusion operator. The generalized graph diffusion operator is defined as follows:
 
 $$\tilde{\boldsymbol H}^{(l,0)} = \boldsymbol H^{(l-1)}\boldsymbol W^{(l)},$$
@@ -23,9 +26,9 @@ where $\otimes$ denotes the element-wise matrix multiplication. We describe the 
 
 $$\tilde{\boldsymbol h}^{(l,0)}_i=\boldsymbol h^{(l-1)}_i\boldsymbol W^{(l)},$$
 
-$$\tilde{\boldsymbol h}^{(l,k)}_i=\sum_{j\in \mathcal{N}_i}\overline{A}_{ij}\tilde{\boldsymbol h}^{(l,k-1)}_j,$$
+$$\tilde{\boldsymbol h}^{(l,k)}_i=\sum_{j\in \mathcal{N}_i}\left(\overline{A}_{ij}\tilde{\boldsymbol h}^{(l,k-1)}_j\right),$$
 
-$$h^{(l)}_{ic}=\sum_{k=0}^{K}\theta_{ikc}\tilde{h}^{(l,k)}_{ic}+\sum_{c'=1}^{d^{(l-1)}}h^{(l-1)}_{ic'}W^{(l),r}_{c'c},$$
+$$h^{(l)}_{ic}=\left[\sum_{k=0}^{K}\left(\theta_{ikc}\tilde{h}^{(l,k)}_{ic}\right)+\sum_{c'=1}^{d^{(l-1)}}\left(h^{(l-1)}_{ic'}W^{(l),r}_{c'c}\right)\right],$$
 
 To obtain the possibly node-wise or channel-wise weighting coefficients $\theta_{ikc}$, we propose two mechanisms: Hop-wise Attention (HA) and Hop-wise Convolution (HC).
 
