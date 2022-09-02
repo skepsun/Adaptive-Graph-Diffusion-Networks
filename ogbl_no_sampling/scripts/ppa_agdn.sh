@@ -1,0 +1,25 @@
+cd "$(dirname $0)"
+python -u ../src/main.py \
+    --dataset ogbl-ppa \
+    --epochs 40 \
+    --model agdn \
+    --eval-steps 1 \
+    --log-steps 1 \
+    --K 2 \
+    --hop-norm \
+    --transition-matrix gat \
+    --negative-sampler global \
+    --eval-metric hits \
+    --lr 0.01 \
+    --n-layers 2 \
+    --n-hidden 64 \
+    --n-heads 1 \
+    --batch-size 65536 \
+    --dropout 0. \
+    --attn-drop 0.2 \
+    --input-drop 0. \
+    --diffusion-drop 0. \
+    --use-emb \
+    --no-node-feat \
+    --loss-func CE \
+    --bn

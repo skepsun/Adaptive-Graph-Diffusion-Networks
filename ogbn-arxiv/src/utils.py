@@ -3,6 +3,7 @@ import os
 import random
 
 import dgl
+from scipy import sparse as sp
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -11,14 +12,40 @@ from matplotlib.ticker import AutoMinorLocator, MultipleLocator
 
 epsilon = 1 - math.log(2)
 
+def positional_encoding(g, pos_enc_dim):
+    """
+        Graph positional encoding v/ Laplacian eigenvectors
+    """
+    
+    # Laplacian
+    A = g.adjacency_matrix_scipy(return_edge_ids=False).astype(float)
+    N = sp.diags(dgl.backend.asnumpy(g.in_degrees()).clip(1) ** -0.5, dtype=float)
+    L = sp.eye(g.number_of_nodes()) - N * A * N
+
+    # # Eigenvectors with numpy
+    # EigVal, EigVec = np.linalg.eig(L.toarray())
+    # idx = EigVal.argsort() # increasing order
+    # EigVal, EigVec = EigVal[idx], np.real(EigVec[:,idx])
+    # g.ndata['pos_enc'] = torch.from_numpy(np.abs(EigVec[:,1:pos_enc_dim+1])).float() 
+
+    # Eigenvectors with scipy
+    #EigVal, EigVec = sp.linalg.eigs(L, k=pos_enc_dim+1, which='SR')
+    EigVal, EigVec = sp.linalg.eigs(L, k=pos_enc_dim+1, which='SR', tol=1e-2)
+    EigVec = EigVec[:, EigVal.argsort()] # increasing order
+    return torch.from_numpy(np.real(EigVec[:,1:pos_enc_dim+1])).float().to(g.device)
+
+    
 def compute_norm(graph):
+    degs = graph.in_degrees().float().clamp(min=1)
+    deg_inv = torch.pow(degs, -1)
+
     degs = graph.in_degrees().float().clamp(min=1)
     deg_isqrt = torch.pow(degs, -0.5)
 
     degs = graph.in_degrees().float().clamp(min=1)
     deg_sqrt = torch.pow(degs, 0.5)
 
-    return deg_sqrt, deg_isqrt
+    return deg_inv, deg_sqrt, deg_isqrt
 
 def save_checkpoint(pred, n_running, checkpoint_path):
     fname = os.path.join(checkpoint_path, f'best_pred_run{n_running}.pt')
@@ -33,6 +60,19 @@ def loge_cross_entropy(x, labels):
     y = torch.log(epsilon + y) - math.log(epsilon)
     return torch.mean(y)
 
+def consis_loss(ps, temp, lam, conf=0.):
+    """
+    Consistency loss from GRAND [https://arxiv.org/pdf/2005.11079.pdf].
+    """
+    avg_p = torch.mean(ps, dim = 2)
+    sharp_p = (torch.pow(avg_p, 1./temp) / torch.sum(torch.pow(avg_p, 1./temp), dim=1, keepdim=True)).detach()
+
+    sharp_p = sharp_p.unsqueeze(2)
+    loss = torch.mean(torch.sum(torch.pow(ps - sharp_p, 2)[avg_p.max(1)[0] > conf], dim = 1, keepdim=True))
+
+    loss = lam * loss
+    return loss
+    
 def loss_kd_only(all_out,teacher_all_out,temperature):
     T = temperature
     D_KL = torch.nn.KLDivLoss()(F.log_softmax(all_out/T, dim=1), F.softmax(teacher_all_out/T, dim=1)) * (T * T)
@@ -97,3 +137,7 @@ def plot(accs, train_accs, val_accs, test_accs, losses, train_losses, val_losses
     plt.legend()
     plt.tight_layout()
     plt.savefig(f"gat_loss_{n_running}.png")
+
+def print_info(s, verbose=1):
+    if verbose:
+        print(s)

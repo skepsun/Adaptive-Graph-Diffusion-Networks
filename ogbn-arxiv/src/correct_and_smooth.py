@@ -91,8 +91,8 @@ def run(args, graph, labels, pred, train_idx, val_idx, test_idx, evaluator):
 
     y = pred.clone()
     y[train_idx] = F.one_hot(labels[train_idx], n_classes).float().squeeze(1)
-    # dy = torch.zeros(graph.number_of_nodes(), n_classes, device=device)
-    # dy[train_idx] = F.one_hot(labels[train_idx], n_classes).float().squeeze(1) - pred[train_idx]
+    dy = torch.zeros(graph.number_of_nodes(), n_classes, device=device)
+    dy[train_idx] = F.one_hot(labels[train_idx], n_classes).float().squeeze(1) - pred[train_idx]
 
     _train_acc, origin_val_acc, origin_test_acc = evaluate(labels, y, train_idx, val_idx, test_idx, evaluator_wrapper)
 
@@ -101,16 +101,17 @@ def run(args, graph, labels, pred, train_idx, val_idx, test_idx, evaluator):
     print("original test acc:", origin_test_acc)
 
     # NOTE: Only "smooth" is performed here.
-    # smoothed_dy = general_outcome_correlation(
-    #     graph, dy, alpha=args.alpha1, use_norm=args.use_norm, post_step=lambda x: x.clamp(-1, 1)
-    # )
+    if not args.only_smooth:
+        smoothed_dy = general_outcome_correlation(
+            graph, dy, n_prop=args.n_prop1, alpha=args.alpha1, use_norm=args.use_norm, post_step=lambda x: x.clamp(-1, 1)
+        )
 
-    # y[train_idx] = F.one_hot(labels[train_idx], n_classes).float().squeeze(1)
-    # smoothed_dy = smoothed_dy
-    # y = y + args.alpha2 * smoothed_dy  # .clamp(0, 1)
+        y[train_idx] = F.one_hot(labels[train_idx], n_classes).float().squeeze(1)
+        smoothed_dy = smoothed_dy
+        y = y + args.alpha1 * smoothed_dy  # .clamp(0, 1)
 
     smoothed_y = general_outcome_correlation(
-        graph, y, n_prop=args.n_prop, alpha=args.alpha, use_norm=args.use_norm, post_step=lambda x: x.clamp(0, 1)
+        graph, y, n_prop=args.n_prop2, alpha=args.alpha2, use_norm=args.use_norm, post_step=lambda x: x.clamp(0, 1)
     )
 
     _train_acc, val_acc, test_acc = evaluate(labels, smoothed_y, train_idx, val_idx, test_idx, evaluator_wrapper)
@@ -128,10 +129,13 @@ def main():
     argparser = argparse.ArgumentParser(description="implementation of C&S)")
     argparser.add_argument("--cpu", action="store_true", help="CPU mode. This option overrides --gpu.")
     argparser.add_argument("--gpu", type=int, default=0, help="GPU device ID.")
+    argparser.add_argument("--only-smooth", action="store_true", help="Only smooth the outcome.")
     argparser.add_argument("--use-norm", action="store_true", help="Use symmetrically normalized adjacency matrix.")
-    argparser.add_argument("--alpha", type=float, default=0.73, help="alpha")
-    argparser.add_argument("--n-prop", type=int, default=8)
-    argparser.add_argument("--pred-files", type=str, default="../output2/*.pt", help="address of prediction files")
+    argparser.add_argument("--alpha1", type=float, default=0.15, help="alpha1")
+    argparser.add_argument("--n-prop1", type=int, default=10)
+    argparser.add_argument("--alpha2", type=float, default=0.4, help="alpha2")
+    argparser.add_argument("--n-prop2", type=int, default=10)
+    argparser.add_argument("--pred-files", type=str, default="./checkpoint1/*.pt", help="address of prediction files")
     args = argparser.parse_args()
 
     if args.cpu:

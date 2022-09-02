@@ -1,0 +1,24 @@
+cd "$(dirname $0)" 
+python -u ../src/main.py \
+    --model agdn \
+    --train-partition-num 35 \
+    --eval-partition-num 1 \
+    --gpu 0 \
+    --eval-gpu -1 \
+    --lr 0.01 \
+    --n-epochs 100 \
+    --model agdn \
+    --advanced-optimizer \
+    --sample-type random_cluster \
+    --estimation-mode \
+    --n-hidden 120 \
+    --n-layers 4 \
+    --n-heads 4 \
+    --K 3 \
+    --dropout 0.5 \
+    --input-drop 0.1 \
+    --attn-drop 0.0 \
+    --edge-drop 0.1 \
+    --eval-every 10 \
+    --log-every 10 \
+    --wd 0
