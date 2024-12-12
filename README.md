@@ -97,6 +97,19 @@ ogbn-products:
 | RevGNN-112 | 83.07±0.30 | 92.90±0.07 |
 | AGDN | 83.34±0.27 | 92.29±0.10 |
 
+Heterophily-prone datasets: Chameleon & Squirrel & Actor (Test Accuracy (%)):
+|  Model   | Chameleon | Squirrel | Actor |
+|  ----  | ----  | ----  | ---- |
+| GCN | 62.72±2.09 | 47.26±0.34 | 29.98±1.18 |
+| GAT | 62.19±3.78 | 51.80±1.04 | 28.17±1.19 |
+| APPNP | 50.88±1.18 | 33.58±1.00 | 29.82±0.82 |
+| ChebyNet | 59.98±1.54 | 40.18±0.55 | 35.85±1.05 |
+| GPR-GNN | 67.96±2.55 | 49.52±5.00 | 30.78±0.61 |
+| JKNet | 64.63±3.08 | 44.91±1.94 | 28.48±1.25 |
+| JacobiConv | 73.09±1.35 | 56.70±1.92 | 30.37±0.93 |
+| GOAL | 71.65±1.66 | 60.53±1.60 | 36.46±1.02 |
+| AGDN | 73.53±1.45 | 61.37±1.93 | 37.37±1.38 |
+
 ogbl-ppa:
 |  Model   | Test Hits@100 (%) | Validation Hits@100 (%) |
 |  ----  | ----  | ----  |
@@ -138,7 +151,7 @@ ogbl-citation2:
 | PLNLP | 84.92±0.29 | 84.90±0.31 |
 | Ours (AGDN) | 85.49±0.29 | 85.56±0.33 |
 
-## Performance
+## Runtime and Parameters
 ogbn-proteins (The inference runtime on another RTX 6000 (48Gb) card of RevGNN is not reported in its paper):
 | Model | Training Runtime | Inference Runtime | Parameters |
 | ----- | ---- | ---- | ---- |
